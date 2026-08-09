@@ -39,7 +39,8 @@
       "name": "Underline",
       "type": "combining",
       "mark": "0332",
-      "skipWhitespace": true
+      "skipWhitespace": true,
+      "skipNonAlphanumeric": true
     },
     "strike": {
       "name": "Strikethrough",
