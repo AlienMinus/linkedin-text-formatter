@@ -261,7 +261,7 @@ const unicodeEngine = {
         // style requests skipNonAlphanumeric.
         if (
           config.skipNonAlphanumeric &&
-          !/[\\p{L}\\p{N}]/u.test(ch)
+          !/[\p{L}\p{N}]/u.test(ch)
         ) {
           return ch;
         }
