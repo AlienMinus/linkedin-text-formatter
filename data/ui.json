@@ -79,5 +79,21 @@
       "title": "Negative Squared",
       "shortcut": "Alt+N"
     }
-  ]
+  ],
+  "previewCard": {
+    "profileName": "Alex Morgan",
+    "profileRole": "Growth @ Typefully",
+    "profileTime": "12h · 🌐",
+    "avatarInitials": "AM",
+    "reactions": "👍 ❤️ 🏅",
+    "reactionCount": "253",
+    "commentCount": "28 comments",
+    "repostCount": "56 reposts",
+    "actions": {
+      "like": "Like",
+      "comment": "Comment",
+      "repost": "Repost",
+      "send": "Send"
+    }
+  }
 }

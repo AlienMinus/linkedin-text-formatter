@@ -179,8 +179,7 @@ h1 {
   font-size: .75rem;
 }
 
-textarea,
-#preview {
+textarea {
   width: 100%;
   height: 500px;
   margin: 0;
@@ -193,17 +192,172 @@ textarea,
   overflow: auto;
   resize: vertical;
   box-shadow: 0 0 10px rgba(156, 39, 176, .25);
-}
-
-textarea {
   display: block;
   line-height: 1.45;
   tab-size: 4;
 }
 
-#preview {
+/* -----------------------------------------------------------------------
+   LinkedIn-style visual preview
+   ----------------------------------------------------------------------- */
+
+.linkedin-preview {
+  width: 100%;
+  height: 500px;
+  overflow: auto;
+  padding: 18px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: #eef0f3;
+  box-shadow: 0 0 10px rgba(156, 39, 176, .25);
+}
+
+.linkedin-card {
+  width: min(100%, 610px);
+  margin: 0 auto;
+  background: #ffffff;
+  color: #1f2328;
+  border: 1px solid #d7dce0;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+.linkedin-profile {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 18px 8px;
+}
+
+.linkedin-avatar {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eef3f8;
+  color: #263238;
+  border: 1px solid #d0d7de;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.linkedin-profile-meta {
+  min-width: 0;
+}
+
+.linkedin-profile-name {
+  font-size: 1.02rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #111827;
+}
+
+.linkedin-profile-role,
+.linkedin-profile-time {
+  color: #667085;
+  font-size: .79rem;
+  line-height: 1.35;
+}
+
+.linkedin-post-content {
+  padding: 18px 18px 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1rem;
   line-height: 1.45;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.linkedin-post-content .underline {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
+}
+
+.linkedin-post-content .strike {
+  text-decoration-line: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.linkedin-post-content .underline.strike {
+  text-decoration-line: underline line-through;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.linkedin-engagement {
+  min-height: 43px;
+  margin: 8px 18px 0;
+  padding: 10px 0;
+  border-bottom: 1px solid #e1e5e9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667085;
+  font-size: .82rem;
+}
+
+.linkedin-reactions,
+.linkedin-engagement-stats {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.reaction-icons {
+  letter-spacing: -3px;
+  margin-right: 2px;
+}
+
+.linkedin-actions {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 6px 10px 9px;
+}
+
+.linkedin-actions button {
+  border: 0;
+  background: transparent;
+  color: #1f2328;
+  min-height: 44px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: .88rem;
+  font-weight: 650;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.linkedin-actions button:hover {
+  background: #f3f6f8;
+  box-shadow: none;
+}
+
+.linkedin-action-icon {
+  font-size: 1.28rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* Keep the visual preview white even when the application is dark. */
+.linkedin-preview::-webkit-scrollbar-track {
+  background: #eef0f3;
+}
+
+.linkedin-preview::-webkit-scrollbar-thumb {
+  background: #a7afb8;
+  border-color: #eef0f3;
 }
 
 footer {
@@ -300,5 +454,25 @@ footer {
   #stats {
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+
+@media (max-width: 800px) {
+  .linkedin-preview {
+    padding: 10px;
+  }
+
+  .linkedin-post-content {
+    font-size: .95rem;
+  }
+
+  .linkedin-actions button {
+    font-size: .78rem;
+    gap: 4px;
+  }
+
+  .linkedin-action-icon {
+    font-size: 1.08rem;
   }
 }

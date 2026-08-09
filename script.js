@@ -637,8 +637,115 @@ function redo() {
 // RENDER / STATS
 // ============================================================================
 
+function renderPreviewText(text) {
+  // The copied output remains the original Unicode string.
+  // For the visual preview only, strip combining underline/strike marks
+  // and render them as real CSS decoration. This gives descenders such as
+  // p, j, q, g and y a continuous underline like a real editor.
+  let html = "";
+  let pending = "";
+  let decoration = new Set();
+
+  for (const ch of [...text]) {
+    const cp = ch.codePointAt(0);
+
+    if (cp === 0x0331 || cp === 0x0332) {
+      decoration.add("underline");
+      continue;
+    }
+
+    if (cp === 0x0336) {
+      decoration.add("strike");
+      continue;
+    }
+
+    const escaped = escapeHTML(ch);
+
+    if (decoration.size === 0) {
+      html += escaped;
+    } else {
+      const classes = [...decoration].join(" ");
+      html += `<span class="${classes}">${escaped}</span>`;
+      decoration.clear();
+    }
+  }
+
+  // If a combining mark somehow occurs at the very end, don't lose it.
+  if (pending) html += pending;
+
+  return html || "";
+}
+
+function buildPreviewCard() {
+  const config = state.ui.previewCard;
+
+  DOM.preview.innerHTML = `
+    <article class="linkedin-card">
+      <header class="linkedin-profile">
+        <div class="linkedin-avatar" aria-hidden="true">
+          ${escapeHTML(config.avatarInitials)}
+        </div>
+
+        <div class="linkedin-profile-meta">
+          <div class="linkedin-profile-name">
+            ${escapeHTML(config.profileName)}
+          </div>
+          <div class="linkedin-profile-role">
+            ${escapeHTML(config.profileRole)}
+          </div>
+          <div class="linkedin-profile-time">
+            ${escapeHTML(config.profileTime)}
+          </div>
+        </div>
+      </header>
+
+      <div class="linkedin-post-content" id="linkedinPostContent"></div>
+
+      <div class="linkedin-engagement">
+        <div class="linkedin-reactions">
+          <span class="reaction-icons">${escapeHTML(config.reactions)}</span>
+          <span>${escapeHTML(config.reactionCount)}</span>
+        </div>
+
+        <div class="linkedin-engagement-stats">
+          <span>${escapeHTML(config.commentCount)}</span>
+          <span>·</span>
+          <span>${escapeHTML(config.repostCount)}</span>
+        </div>
+      </div>
+
+      <div class="linkedin-actions" aria-hidden="true">
+        <button type="button" tabindex="-1">
+          <span class="linkedin-action-icon">♡</span>
+          <span>${escapeHTML(config.actions.like)}</span>
+        </button>
+
+        <button type="button" tabindex="-1">
+          <span class="linkedin-action-icon">◯</span>
+          <span>${escapeHTML(config.actions.comment)}</span>
+        </button>
+
+        <button type="button" tabindex="-1">
+          <span class="linkedin-action-icon">↻</span>
+          <span>${escapeHTML(config.actions.repost)}</span>
+        </button>
+
+        <button type="button" tabindex="-1">
+          <span class="linkedin-action-icon">➤</span>
+          <span>${escapeHTML(config.actions.send)}</span>
+        </button>
+      </div>
+    </article>
+  `;
+}
+
 function updatePreview() {
-  DOM.preview.textContent = DOM.editor.value;
+  if (!DOM.preview.querySelector(".linkedin-card")) {
+    buildPreviewCard();
+  }
+
+  const content = DOM.preview.querySelector("#linkedinPostContent");
+  content.innerHTML = renderPreviewText(DOM.editor.value);
 }
 
 function updateStats() {
