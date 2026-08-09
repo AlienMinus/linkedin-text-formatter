@@ -166,10 +166,20 @@ function isLetterASCII(ch) {
 
 const unicodeEngine = {
   decoders: [],
-  combiningMarks: new Set(["0332", "0336"]),
+  combiningMarks: new Set(),
 
   rebuild() {
     this.decoders = [];
+
+    // Combining marks are style data too. Read them from styles.json so
+    // changing underline/strike never requires editing this JS file.
+    this.combiningMarks = new Set();
+
+    for (const config of Object.values(state.styles)) {
+      if (config.type === "combining" && config.mark) {
+        this.combiningMarks.add(config.mark.toUpperCase());
+      }
+    }
 
     for (const [styleName, config] of Object.entries(state.styles)) {
       if (config.type !== "math") continue;

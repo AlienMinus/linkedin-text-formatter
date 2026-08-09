@@ -38,7 +38,7 @@
     "underline": {
       "name": "Underline",
       "type": "combining",
-      "mark": "0332",
+      "mark": "0331",
       "skipWhitespace": true,
       "skipNonAlphanumeric": true
     },
