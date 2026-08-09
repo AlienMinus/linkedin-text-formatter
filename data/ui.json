@@ -1,0 +1,83 @@
+{
+  "app": {
+    "title": "LinkedIn Unicode Formatter",
+    "subtitle": "Format selected text with Unicode characters",
+    "editorHeading": "Editor",
+    "previewHeading": "Preview",
+    "previewBadge": "LinkedIn-ready output",
+    "shortcutTitle": "Keyboard shortcuts",
+    "charsLabel": "Chars",
+    "wordsLabel": "Words",
+    "selectionPrompt": "Select text to format",
+    "selectedTemplate": "{count} characters selected",
+    "copied": "Copied!",
+    "copy": "📋 Copy Output",
+    "undo": "Undo",
+    "redo": "Redo",
+    "clear": "Clear",
+    "statusReady": "Ready",
+    "statusFormatted": "Applied {style}",
+    "statusNoSelection": "Select some text first",
+    "statusNothingToUndo": "Nothing to undo",
+    "statusNothingToRedo": "Nothing to redo",
+    "statusCleared": "Editor cleared",
+    "statusCopyFailed": "Copy failed — use Ctrl+C",
+    "maxChars": 3000
+  },
+  "toolbar": [
+    {
+      "style": "bold",
+      "label": "𝗕",
+      "title": "Bold",
+      "shortcut": "Ctrl+B"
+    },
+    {
+      "style": "italic",
+      "label": "𝐼",
+      "title": "Italic",
+      "shortcut": "Ctrl+I"
+    },
+    {
+      "style": "boldItalic",
+      "label": "𝑩𝑰",
+      "title": "Bold Italic",
+      "shortcut": "Ctrl+Shift+B"
+    },
+    {
+      "style": "mono",
+      "label": "Mono",
+      "title": "Monospace",
+      "shortcut": "Ctrl+M"
+    },
+    {
+      "style": "underline",
+      "label": "U̲",
+      "title": "Underline",
+      "shortcut": "Ctrl+U"
+    },
+    {
+      "style": "strike",
+      "label": "S̶",
+      "title": "Strikethrough",
+      "shortcut": "Ctrl+Shift+X"
+    },
+    {
+      "style": "circled",
+      "label": "Ⓒ",
+      "title": "Circled",
+      "shortcut": "Alt+C"
+    },
+    {
+      "style": "squared",
+      "label": "▣",
+      "title": "Squared",
+      "shortcut": "Alt+S"
+    },
+    {
+      "style": "negativeSquared",
+      "label": "🅾",
+      "title": "Negative Squared",
+      "shortcut": "Alt+N"
+    }
+  ]
+}

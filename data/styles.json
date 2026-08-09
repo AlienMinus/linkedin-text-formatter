@@ -1,0 +1,50 @@
+{
+  "styles": {
+    "bold": {
+      "name": "Bold",
+      "type": "math",
+      "upper": "1D400",
+      "lower": "1D41A"
+    },
+    "italic": {
+      "name": "Italic",
+      "type": "math",
+      "upper": "1D434",
+      "lower": "1D44E"
+    },
+    "boldItalic": {
+      "name": "Bold Italic",
+      "type": "math",
+      "upper": "1D468",
+      "lower": "1D482"
+    },
+    "mono": {
+      "name": "Monospace",
+      "type": "math",
+      "upper": "1D670",
+      "lower": "1D68A"
+    },
+    "underline": {
+      "name": "Underline",
+      "type": "combining",
+      "mark": "0332"
+    },
+    "strike": {
+      "name": "Strikethrough",
+      "type": "combining",
+      "mark": "0336"
+    },
+    "circled": {
+      "name": "Circled",
+      "type": "circled"
+    },
+    "squared": {
+      "name": "Squared",
+      "type": "squared"
+    },
+    "negativeSquared": {
+      "name": "Negative Squared",
+      "type": "negativeSquared"
+    }
+  }
+}

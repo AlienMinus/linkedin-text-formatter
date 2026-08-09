@@ -1,812 +1,559 @@
-// =====================================================
 // LinkedIn Unicode Formatter
-// Part 1 - Core
-// =====================================================
-
-// ------------------------------
-// DOM
-// ------------------------------
+// Data-driven UI + robust Unicode normalization + keyboard shortcuts.
 
 const editor = document.getElementById("editor");
 const preview = document.getElementById("preview");
+const toolbar = document.getElementById("toolbar");
 
-const copyBtn = document.getElementById("copyBtn");
 const undoBtn = document.getElementById("undoBtn");
 const redoBtn = document.getElementById("redoBtn");
+const copyBtn = document.getElementById("copyBtn");
 const clearBtn = document.getElementById("clearBtn");
 
 const charCount = document.getElementById("charCount");
+const maxChars = document.getElementById("maxChars");
 const wordCount = document.getElementById("wordCount");
 const progressBar = document.getElementById("progressBar");
 const selectionInfo = document.getElementById("selectionInfo");
+const statusMessage = document.getElementById("statusMessage");
 
-const MAX_CHAR = 3000;
+let UI;
+let SHORTCUTS;
+let STYLE_CONFIG;
 
+const MAX_CHAR_FALLBACK = 3000;
 
-// ------------------------------
-// History
-// ------------------------------
+// -----------------------------------------------------------------------------
+// Data loading
+// -----------------------------------------------------------------------------
+
+async function loadJSON(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not load ${path}`);
+  return response.json();
+}
+
+async function loadAppData() {
+  try {
+    [UI, SHORTCUTS, STYLE_CONFIG] = await Promise.all([
+      loadJSON("./data/ui.json"),
+      loadJSON("./data/shortcuts.json"),
+      loadJSON("./data/styles.json")
+    ]);
+  } catch (error) {
+    console.error(error);
+    // The app intentionally stops here instead of silently using stale strings.
+    document.body.innerHTML = `
+      <div style="font-family:Arial;padding:30px;max-width:700px;margin:auto">
+        <h2>Unable to load formatter data</h2>
+        <p>Run this project through a local web server instead of opening
+        <code>index.html</code> directly with <code>file://</code>.</p>
+        <p>For example: <code>python -m http.server 8000</code></p>
+      </div>`;
+    throw error;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Unicode normalization
+// IMPORTANT: Do not use a hand-written decode table for mathematical alphabets.
+// Code-point ranges are deterministic and avoid bugs such as the old bold
+// s-z entries being mapped to a different Unicode alphabet.
+// -----------------------------------------------------------------------------
+
+const SPECIAL_LETTERS = {
+  // Mathematical alphabets use a few compatibility characters.
+  italicUpper: { H: "ℋ", I: "ℐ", L: "ℒ", R: "ℛ" },
+  italicLower: { h: "ℎ" },
+  boldItalicUpper: { C: "𝑪", H: "𝑯" },
+  boldItalicLower: {},
+  monoUpper: {},
+  monoLower: {}
+};
+
+const CIRCLED_DECODE = {
+  "ⓐ":"a","ⓑ":"b","ⓒ":"c","ⓓ":"d","ⓔ":"e","ⓕ":"f","ⓖ":"g","ⓗ":"h","ⓘ":"i","ⓙ":"j",
+  "ⓚ":"k","ⓛ":"l","ⓜ":"m","ⓝ":"n","ⓞ":"o","ⓟ":"p","ⓠ":"q","ⓡ":"r","ⓢ":"s","ⓣ":"t",
+  "ⓤ":"u","ⓥ":"v","ⓦ":"w","ⓧ":"x","ⓨ":"y","ⓩ":"z",
+  "Ⓐ":"A","Ⓑ":"B","Ⓒ":"C","Ⓓ":"D","Ⓔ":"E","Ⓕ":"F","Ⓖ":"G","Ⓗ":"H","Ⓘ":"I","Ⓙ":"J",
+  "Ⓚ":"K","Ⓛ":"L","Ⓜ":"M","Ⓝ":"N","Ⓞ":"O","Ⓟ":"P","Ⓠ":"Q","Ⓡ":"R","Ⓢ":"S","Ⓣ":"T",
+  "Ⓤ":"U","Ⓥ":"V","Ⓦ":"W","Ⓧ":"X","Ⓨ":"Y","Ⓩ":"Z",
+  "⓪":"0","①":"1","②":"2","③":"3","④":"4","⑤":"5","⑥":"6","⑦":"7","⑧":"8","⑨":"9"
+};
+
+const SQUARED_DECODE = {
+  "🄰":"A","🄱":"B","🄲":"C","🄳":"D","🄴":"E","🄵":"F","🄶":"G","🄷":"H","🄸":"I","🄹":"J",
+  "🄺":"K","🄻":"L","🄼":"M","🄽":"N","🄾":"O","🄿":"P","🅀":"Q","🅁":"R","🅂":"S","🅃":"T",
+  "🅄":"U","🅅":"V","🅆":"W","🅇":"X","🅈":"Y","🅉":"Z"
+};
+
+const NEGATIVE_SQUARED_DECODE = {
+  "🅰":"A","🅱":"B","🅲":"C","🅳":"D","🅴":"E","🅵":"F","🅶":"G","🅷":"H","🅸":"I","🅹":"J",
+  "🅺":"K","🅻":"L","🅼":"M","🅽":"N","🅾":"O","🅿":"P","🆀":"Q","🆁":"R","🆂":"S","🆃":"T",
+  "🆄":"U","🆅":"V","🆆":"W","🆇":"X","🆈":"Y","🆉":"Z"
+};
+
+function codePointRangeMap(text, upperStart, lowerStart, special = {}) {
+  let output = "";
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+
+    if (cp >= 65 && cp <= 90) {
+      output += String.fromCodePoint(upperStart + cp - 65);
+    } else if (cp >= 97 && cp <= 122) {
+      output += String.fromCodePoint(lowerStart + cp - 97);
+    } else {
+      output += ch;
+    }
+  }
+  return output;
+}
+
+function decodeMathChar(ch) {
+  const cp = ch.codePointAt(0);
+
+  // Mathematical Bold
+  if (cp >= 0x1D5A0 && cp <= 0x1D5B9) return String.fromCharCode(65 + cp - 0x1D5A0);
+  if (cp >= 0x1D5BA && cp <= 0x1D5D3) return String.fromCharCode(97 + cp - 0x1D5BA);
+
+  // Mathematical Italic
+  const italicUpperExceptions = {
+    0x210E:"H", 0x2110:"I", 0x2112:"L", 0x211B:"R"
+  };
+  if (italicUpperExceptions[cp]) return italicUpperExceptions[cp];
+  if (cp >= 0x1D434 && cp <= 0x1D44D) return String.fromCharCode(65 + cp - 0x1D434);
+  if (cp >= 0x1D44E && cp <= 0x1D467) return String.fromCharCode(97 + cp - 0x1D44E);
+  if (cp === 0x210E) return "h";
+
+  // Mathematical Bold Italic
+  if (cp >= 0x1D468 && cp <= 0x1D481) return String.fromCharCode(65 + cp - 0x1D468);
+  if (cp >= 0x1D482 && cp <= 0x1D49B) return String.fromCharCode(97 + cp - 0x1D482);
+
+  // Mathematical Monospace
+  if (cp >= 0x1D670 && cp <= 0x1D689) return String.fromCharCode(65 + cp - 0x1D670);
+  if (cp >= 0x1D68A && cp <= 0x1D6A3) return String.fromCharCode(97 + cp - 0x1D68A);
+
+  return null;
+}
+
+function normalizeText(text) {
+  // Strip combining marks used by underline/strike, then decode Unicode styles.
+  let result = text.normalize("NFD").replace(/[\u0332\u0336]/g, "");
+
+  let decoded = "";
+  for (const ch of result) {
+    const math = decodeMathChar(ch);
+    if (math !== null) {
+      decoded += math;
+    } else if (CIRCLED_DECODE[ch]) {
+      decoded += CIRCLED_DECODE[ch];
+    } else if (SQUARED_DECODE[ch]) {
+      decoded += SQUARED_DECODE[ch];
+    } else if (NEGATIVE_SQUARED_DECODE[ch]) {
+      decoded += NEGATIVE_SQUARED_DECODE[ch];
+    } else {
+      decoded += ch;
+    }
+  }
+
+  // Remove accidental combining marks left by copy/paste, but preserve normal
+  // Unicode characters as much as possible.
+  return decoded.normalize("NFC");
+}
+
+// -----------------------------------------------------------------------------
+// Formatting
+// -----------------------------------------------------------------------------
+
+function bold(text) {
+  return codePointRangeMap(text, 0x1D5A0, 0x1D5BA);
+}
+
+function italic(text) {
+  let output = "";
+  for (const ch of text) {
+    if (SPECIAL_LETTERS.italicUpper[ch]) output += SPECIAL_LETTERS.italicUpper[ch];
+    else if (SPECIAL_LETTERS.italicLower[ch]) output += SPECIAL_LETTERS.italicLower[ch];
+    else {
+      const cp = ch.codePointAt(0);
+      if (cp >= 65 && cp <= 90) output += String.fromCodePoint(0x1D434 + cp - 65);
+      else if (cp >= 97 && cp <= 122) output += String.fromCodePoint(0x1D44E + cp - 97);
+      else output += ch;
+    }
+  }
+  return output;
+}
+
+function boldItalic(text) {
+  return codePointRangeMap(text, 0x1D468, 0x1D482);
+}
+
+function mono(text) {
+  return codePointRangeMap(text, 0x1D670, 0x1D68A);
+}
+
+function underline(text) {
+  return [...text].map(ch => ch + "\u0332").join("");
+}
+
+function strike(text) {
+  return [...text].map(ch => ch + "\u0336").join("");
+}
+
+const squareMap = {
+  A:"🄰",B:"🄱",C:"🄲",D:"🄳",E:"🄴",F:"🄵",G:"🄶",H:"🄷",I:"🄸",J:"🄹",
+  K:"🄺",L:"🄻",M:"🄼",N:"🄽",O:"🄾",P:"🄿",Q:"🅀",R:"🅁",S:"🅂",T:"🅃",
+  U:"🅄",V:"🅅",W:"🅆",X:"🅇",Y:"🅈",Z:"🅉"
+};
+
+const negativeSquareMap = {
+  A:"🅰",B:"🅱",C:"🅲",D:"🅳",E:"🅴",F:"🅵",G:"🅶",H:"🅷",I:"🅸",J:"🅹",
+  K:"🅺",L:"🅻",M:"🅼",N:"🅽",O:"🅾",P:"🅿",Q:"🆀",R:"🆁",S:"🆂",T:"🆃",
+  U:"🆄",V:"🆅",W:"🆆",X:"🆇",Y:"🆈",Z:"🆉"
+};
+
+function circled(text) {
+  let output = "";
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp >= 65 && cp <= 90) output += String.fromCodePoint(0x24B6 + cp - 65);
+    else if (cp >= 97 && cp <= 122) output += String.fromCodePoint(0x24D0 + cp - 97);
+    else if (cp >= 49 && cp <= 57) output += String.fromCodePoint(0x2460 + cp - 49);
+    else if (ch === "0") output += "⓪";
+    else output += ch;
+  }
+  return output;
+}
+
+function squared(text) {
+  return [...text.toUpperCase()].map(ch => squareMap[ch] || ch).join("");
+}
+
+function negativeSquared(text) {
+  return [...text.toUpperCase()].map(ch => negativeSquareMap[ch] || ch).join("");
+}
+
+const FORMATTERS = {
+  bold,
+  italic,
+  boldItalic,
+  mono,
+  underline,
+  strike,
+  circled,
+  squared,
+  negativeSquared
+};
+
+function convertText(text, style) {
+  return FORMATTERS[style] ? FORMATTERS[style](text) : text;
+}
+
+// -----------------------------------------------------------------------------
+// Selection / history
+// -----------------------------------------------------------------------------
 
 let history = [];
 let historyIndex = -1;
+let isRestoringHistory = false;
 
-
-// ------------------------------
-// Save History
-// ------------------------------
-
-function saveHistory() {
-
-    if (historyIndex >= 0) {
-
-        if (history[historyIndex] === editor.value)
-            return;
-
-    }
-
-    history = history.slice(0, historyIndex + 1);
-
-    history.push(editor.value);
-
-    historyIndex++;
-
+function snapshot() {
+  return {
+    value: editor.value,
+    start: editor.selectionStart,
+    end: editor.selectionEnd
+  };
 }
 
+function saveHistory(force = false) {
+  const value = editor.value;
 
-// ------------------------------
-// Undo
-// ------------------------------
+  if (!force && historyIndex >= 0 && history[historyIndex].value === value) return;
+
+  history = history.slice(0, historyIndex + 1);
+  history.push(snapshot());
+  historyIndex++;
+}
+
+function restoreHistory(item) {
+  isRestoringHistory = true;
+  editor.value = item.value;
+  editor.focus();
+
+  const start = Math.min(item.start, editor.value.length);
+  const end = Math.min(item.end, editor.value.length);
+  editor.setSelectionRange(start, end);
+
+  isRestoringHistory = false;
+  render();
+}
 
 function undo() {
-
-    if (historyIndex <= 0)
-        return;
-
-    historyIndex--;
-
-    editor.value = history[historyIndex];
-
-    render();
-
+  if (historyIndex <= 0) {
+    setStatus(UI.app.statusNothingToUndo);
+    return;
+  }
+  historyIndex--;
+  restoreHistory(history[historyIndex]);
 }
-
-
-// ------------------------------
-// Redo
-// ------------------------------
 
 function redo() {
-
-    if (historyIndex >= history.length - 1)
-        return;
-
-    historyIndex++;
-
-    editor.value = history[historyIndex];
-
-    render();
-
+  if (historyIndex >= history.length - 1) {
+    setStatus(UI.app.statusNothingToRedo);
+    return;
+  }
+  historyIndex++;
+  restoreHistory(history[historyIndex]);
 }
-
-
-
-// ------------------------------
-// Stats
-// ------------------------------
-
-function updateStats() {
-
-    const text = editor.value;
-
-    charCount.textContent = text.length;
-
-    const words = text.trim() === ""
-        ? 0
-        : text.trim().split(/\s+/).length;
-
-    wordCount.textContent = words;
-
-    const percent = Math.min(
-
-        (text.length / MAX_CHAR) * 100,
-
-        100
-
-    );
-
-    progressBar.style.width = percent + "%";
-
-}
-
-
-
-// ------------------------------
-// Preview
-// ------------------------------
-
-function updatePreview() {
-
-    preview.textContent = editor.value;
-
-}
-
-
-
-// ------------------------------
-// Render
-// ------------------------------
-
-function render() {
-
-    updatePreview();
-
-    updateStats();
-
-}
-
-
-
-// ------------------------------
-// Editor Input
-// ------------------------------
-
-editor.addEventListener("input", () => {
-
-    render();
-
-    saveHistory();
-
-});
-
-
-
-// ------------------------------
-// Selection
-// ------------------------------
 
 function getSelection() {
-
-    return {
-
-        start: editor.selectionStart,
-
-        end: editor.selectionEnd
-
-    };
-
+  return {
+    start: editor.selectionStart ?? 0,
+    end: editor.selectionEnd ?? 0
+  };
 }
-
-
 
 function selectedText() {
-
-    const s = getSelection();
-
-    return editor.value.substring(
-
-        s.start,
-
-        s.end
-
-    );
-
+  const { start, end } = getSelection();
+  return editor.value.slice(start, end);
 }
-
-
-
-// ------------------------------
-// Replace Selection
-// ------------------------------
 
 function replaceSelection(newText) {
-    const s = getSelection();
-    const scrollTop = editor.scrollTop;
-    editor.value =
-        editor.value.substring(0, s.start)
-        +
-        newText
-        +
-        editor.value.substring(s.end);
+  const { start, end } = getSelection();
+  const scrollTop = editor.scrollTop;
+
+  editor.value = editor.value.slice(0, start) + newText + editor.value.slice(end);
+  editor.focus();
+  editor.setSelectionRange(start, start + newText.length);
+  editor.scrollTop = scrollTop;
+
+  render();
+  saveHistory();
+}
+
+// -----------------------------------------------------------------------------
+// Toggle behavior
+// -----------------------------------------------------------------------------
+
+function selectionIsExactlyStyle(text, style) {
+  const base = normalizeText(text);
+  if (!base || !FORMATTERS[style]) return false;
+  return convertText(base, style) === text;
+}
+
+function applyStyle(style) {
+  const text = selectedText();
+
+  if (!text) {
+    setStatus(UI.app.statusNoSelection);
     editor.focus();
-    editor.selectionStart = s.start;
-    editor.selectionEnd =
-        s.start + newText.length;
-    editor.scrollTop = scrollTop;
-    render();
-    saveHistory();
+    return;
+  }
+
+  const base = normalizeText(text);
+  const output = selectionIsExactlyStyle(text, style)
+    ? base
+    : convertText(base, style);
+
+  replaceSelection(output);
+
+  const styleName = STYLE_CONFIG.styles[style]?.name || style;
+  setStatus(UI.app.statusFormatted.replace("{style}", styleName));
 }
 
+// -----------------------------------------------------------------------------
+// Rendering
+// -----------------------------------------------------------------------------
 
+function updatePreview() {
+  preview.textContent = editor.value;
+}
 
-// ------------------------------
-// Live Selection Info
-// ------------------------------
+function updateStats() {
+  const text = editor.value;
+  const max = Number(UI.app.maxChars) || MAX_CHAR_FALLBACK;
 
-editor.addEventListener("select", () => {
+  charCount.textContent = text.length;
+  maxChars.textContent = max;
 
-    const txt = selectedText();
+  const trimmed = text.trim();
+  wordCount.textContent = trimmed ? trimmed.split(/\s+/).length : 0;
 
-    if (txt.length === 0)
+  const percent = Math.min((text.length / max) * 100, 100);
+  progressBar.style.width = `${percent}%`;
+  progressBar.classList.toggle("over-limit", text.length > max);
+}
 
-        selectionInfo.textContent =
-            "Select text to format";
+function updateSelectionInfo() {
+  const count = selectedText().length;
+  selectionInfo.textContent = count
+    ? UI.app.selectedTemplate.replace("{count}", count)
+    : UI.app.selectionPrompt;
+}
 
-    else
+function render() {
+  updatePreview();
+  updateStats();
+  updateSelectionInfo();
+}
 
-        selectionInfo.textContent =
-            txt.length + " characters selected";
+function setStatus(message) {
+  statusMessage.textContent = message;
+}
 
+// -----------------------------------------------------------------------------
+// UI from JSON
+// -----------------------------------------------------------------------------
+
+function buildUI() {
+  document.title = UI.app.title;
+
+  document.getElementById("appTitle").textContent = UI.app.title;
+  document.getElementById("appSubtitle").textContent = UI.app.subtitle;
+  document.getElementById("editorHeading").textContent = UI.app.editorHeading;
+  document.getElementById("previewHeading").textContent = UI.app.previewHeading;
+  document.getElementById("previewBadge").textContent = UI.app.previewBadge;
+  document.getElementById("shortcutTitle").textContent = UI.app.shortcutTitle;
+  document.getElementById("charsLabel").textContent = UI.app.charsLabel;
+  document.getElementById("wordsLabel").textContent = UI.app.wordsLabel;
+
+  undoBtn.textContent = UI.app.undo;
+  redoBtn.textContent = UI.app.redo;
+  copyBtn.textContent = UI.app.copy;
+  clearBtn.textContent = UI.app.clear;
+
+  toolbar.innerHTML = "";
+  UI.toolbar.forEach(item => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tool";
+    button.dataset.style = item.style;
+    button.title = `${item.title} — ${item.shortcut}`;
+    button.setAttribute("aria-label", item.title);
+    button.innerHTML = `<span class="tool-glyph">${item.label}</span><span class="tool-name">${item.title}</span><kbd>${item.shortcut}</kbd>`;
+
+    // Critical: prevent the button click from destroying textarea selection.
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => applyStyle(item.style));
+
+    toolbar.appendChild(button);
+  });
+
+  const shortcutList = document.getElementById("shortcutList");
+  shortcutList.innerHTML = "";
+  SHORTCUTS.shortcuts.forEach(item => {
+    const chip = document.createElement("span");
+    chip.className = "shortcut-chip";
+    chip.innerHTML = `<kbd>${formatKeys(item.keys)}</kbd><span>${item.label}</span>`;
+    shortcutList.appendChild(chip);
+  });
+}
+
+function formatKeys(keys) {
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  return keys.map(key => {
+    if (key === "CTRL") return isMac ? "⌘" : "Ctrl";
+    if (key === "SHIFT") return "⇧";
+    if (key === "ALT") return isMac ? "⌥" : "Alt";
+    return key;
+  }).join("+");
+}
+
+// -----------------------------------------------------------------------------
+// Keyboard shortcuts
+// -----------------------------------------------------------------------------
+
+function shortcutMatches(event, keys) {
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const wantsCtrl = keys.includes("CTRL");
+  const wantsShift = keys.includes("SHIFT");
+  const wantsAlt = keys.includes("ALT");
+
+  const ctrlPressed = isMac ? event.metaKey : event.ctrlKey;
+
+  return (
+    ctrlPressed === wantsCtrl &&
+    event.shiftKey === wantsShift &&
+    event.altKey === wantsAlt &&
+    keys.includes(event.key.toUpperCase())
+  );
+}
+
+document.addEventListener("keydown", event => {
+  // Undo / redo are handled separately.
+  if (!event.altKey && !event.shiftKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redo();
+    else undo();
+    return;
+  }
+
+  if (!event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+    event.preventDefault();
+    redo();
+    return;
+  }
+
+  const shortcut = SHORTCUTS.shortcuts.find(item => shortcutMatches(event, item.keys));
+  if (!shortcut) return;
+
+  event.preventDefault();
+  applyStyle(shortcut.style);
 });
 
+// -----------------------------------------------------------------------------
+// Editor events
+// -----------------------------------------------------------------------------
 
-
-
-// ------------------------------
-// Keyboard
-// ------------------------------
-
-document.addEventListener("keydown", e => {
-
-    if (e.ctrlKey && e.key === "z") {
-
-        e.preventDefault();
-
-        undo();
-
-    }
-
-    if (e.ctrlKey && e.key === "y") {
-
-        e.preventDefault();
-
-        redo();
-
-    }
-
+editor.addEventListener("input", () => {
+  if (!isRestoringHistory) saveHistory();
+  render();
 });
 
+["select", "keyup", "click", "focus"].forEach(eventName => {
+  editor.addEventListener(eventName, updateSelectionInfo);
+});
 
+// Save selection before the mouse can move focus to a toolbar control.
+document.addEventListener("selectionchange", updateSelectionInfo);
 
-// ------------------------------
-// Copy
-// ------------------------------
+undoBtn.addEventListener("click", undo);
+redoBtn.addEventListener("click", redo);
 
-copyBtn.onclick = async () => {
+clearBtn.addEventListener("click", () => {
+  if (!editor.value) return;
+  editor.value = "";
+  editor.focus();
+  editor.setSelectionRange(0, 0);
+  saveHistory();
+  render();
+  setStatus(UI.app.statusCleared);
+});
 
-    await navigator.clipboard.writeText(
-
-        editor.value
-
-    );
-
-    copyBtn.textContent = "Copied!";
-
+copyBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(editor.value);
+    copyBtn.textContent = UI.app.copied;
+    setStatus(UI.app.copied);
     setTimeout(() => {
-
-        copyBtn.textContent = "📋 Copy Output";
-
+      copyBtn.textContent = UI.app.copy;
     }, 1200);
-
-};
-
-
-
-// ------------------------------
-// Clear
-// ------------------------------
-
-clearBtn.onclick = () => {
-
-    editor.value = "";
-
-    render();
-
-    saveHistory();
-
-};
-
-
-
-// ------------------------------
-// Undo Redo Buttons
-// ------------------------------
-
-undoBtn.onclick = undo;
-
-redoBtn.onclick = redo;
-
-
-
-// ------------------------------
-// Unicode Mapper
-// ------------------------------
-
-function unicodeMap(
-
-    text,
-
-    upperStart,
-
-    lowerStart
-
-) {
-
-    let output = "";
-
-    for (let ch of text) {
-
-        let code = ch.charCodeAt(0);
-
-        if (
-
-            code >= 65 &&
-            code <= 90
-
-        ) {
-
-            output +=
-
-                String.fromCodePoint(
-
-                    upperStart +
-
-                    code -
-
-                    65
-
-                );
-
-        }
-
-        else if (
-
-            code >= 97 &&
-            code <= 122
-
-        ) {
-
-            output +=
-
-                String.fromCodePoint(
-
-                    lowerStart +
-
-                    code -
-
-                    97
-
-                );
-
-        }
-
-        else {
-
-            output += ch;
-
-        }
-
-    }
-
-    return output;
-
-}
-
-
-
-// ------------------------------
-// Combining Unicode
-// ------------------------------
-
-function underline(text) {
-
-    return [...text]
-
-        .map(
-
-            c => c + "\u0332"
-
-        )
-
-        .join("");
-
-}
-
-
-
-function strike(text) {
-
-    return [...text]
-
-        .map(
-
-            c => c + "\u0336"
-
-        )
-
-        .join("");
-
-}
-
-
-
-// ------------------------------
-// Initial
-// ------------------------------
-
-saveHistory();
-
-render();
-
-
-
-
-// =====================================================
-// Part 2A - Unicode Styles
-// =====================================================
-
-
-// ------------------------------
-// Bold
-// ------------------------------
-
-function bold(text) {
-
-    return unicodeMap(
-
-        text,
-
-        0x1D5A0,
-
-        0x1D5BA
-
-    );
-
-}
-
-
-
-// ------------------------------
-// Italic
-// ------------------------------
-
-function italic(text) {
-
-    return unicodeMap(
-
-        text,
-
-        0x1D434,
-
-        0x1D44E
-
-    );
-
-}
-
-
-
-// ------------------------------
-// Bold Italic
-// ------------------------------
-
-function boldItalic(text) {
-
-    return unicodeMap(
-
-        text,
-
-        0x1D468,
-
-        0x1D482
-
-    );
-
-}
-
-
-
-// ------------------------------
-// Monospace
-// ------------------------------
-
-function mono(text) {
-
-    return unicodeMap(
-
-        text,
-
-        0x1D670,
-
-        0x1D68A
-
-    );
-
-}
-
-
-
-
-// =====================================================
-// Convert Dispatcher
-// =====================================================
-
-function convertText(
-
-    text,
-
-    style
-
-) {
-
-    switch (style) {
-
-        case "bold":
-
-            return bold(text);
-
-
-
-        case "italic":
-
-            return italic(text);
-
-
-
-        case "boldItalic":
-
-            return boldItalic(text);
-
-
-
-        case "mono":
-
-            return mono(text);
-
-
-
-        case "underline":
-
-            return underline(text);
-
-
-
-        case "strike":
-
-            return strike(text);
-
-        
-        case "circled":
-
-            return circled(text);
-        
-        
-        case "squared":
-        
-            return squared(text);
-        
-        
-        case "negativeSquared":
-        
-            return negativeSquared(text);
-
-
-        default:
-
-            return text;
-
-    }
-
-}
-
-
-
-// =====================================================
-// Toolbar Buttons
-// =====================================================
-
-document
-.querySelectorAll(".tool")
-.forEach(button => {
-    button.addEventListener(
-        "click",
-        () => {
-            const text =
-                selectedText();
-            if (
-                text.length === 0
-            )
-                return;
-
-            const normalizedText = normalizeText(text);
-            const style =
-                button.dataset.style;
-            const converted =
-                convertText(
-                    normalizedText,
-                    style
-                );
-            replaceSelection(
-                converted
-            );
-        }
-    );
+  } catch (error) {
+    console.error(error);
+    setStatus(UI.app.statusCopyFailed);
+  }
 });
 
+// -----------------------------------------------------------------------------
+// Startup
+// -----------------------------------------------------------------------------
 
-// =====================================================
-// Part 2B
-// Circled, Squared & Negative Squared
-// =====================================================
+(async function init() {
+  await loadAppData();
+  buildUI();
 
-
-// ------------------------------
-// Circled
-// ------------------------------
-
-function circled(text) {
-    let output = "";
-    for (const ch of text) {
-        const code = ch.charCodeAt(0);
-        // A-Z
-        if (code >= 65 && code <= 90) {
-            output += String.fromCodePoint(
-                0x24B6 + (code - 65)
-            );
-        }
-        // a-z
-        else if (code >= 97 && code <= 122) {
-            output += String.fromCodePoint(
-                0x24D0 + (code - 97)
-            );
-        }
-        // 1-9
-        else if (code >= 49 && code <= 57) {
-            output += String.fromCodePoint(
-                0x2460 + (code - 49)
-            );
-        }
-        // 0
-        else if (ch === "0") {
-            output += "⓪";
-        }
-        else {
-            output += ch;
-        }
-    }
-    return output;
-}
-
-
-
-// ------------------------------
-// Squared
-// ------------------------------
-
-const squareMap = {
-    A:"🄰",
-    B:"🄱",
-    C:"🄲",
-    D:"🄳",
-    E:"🄴",
-    F:"🄵",
-    G:"🄶",
-    H:"🄷",
-    I:"🄸",
-    J:"🄹",
-    K:"🄺",
-    L:"🄻",
-    M:"🄼",
-    N:"🄽",
-    O:"🄾",
-    P:"🄿",
-    Q:"🅀",
-    R:"🅁",
-    S:"🅂",
-    T:"🅃",
-    U:"🅄",
-    V:"🅅",
-    W:"🅆",
-    X:"🅇",
-    Y:"🅈",
-    Z:"🅉"
-};
-
-
-
-function squared(text){
-    let output="";
-    for(const ch of text.toUpperCase()){
-        output += squareMap[ch] || ch;
-    }
-    return output;
-}
-
-
-
-// ------------------------------
-// Negative Squared
-// ------------------------------
-
-const negativeSquareMap={
-A:"🅰",
-B:"🅱",
-C:"🅲",
-D:"🅳",
-E:"🅴",
-F:"🅵",
-G:"🅶",
-H:"🅷",
-I:"🅸",
-J:"🅹",
-K:"🅺",
-L:"🅻",
-M:"🅼",
-N:"🅽",
-O:"🅾",
-P:"🅿",
-Q:"🆀",
-R:"🆁",
-S:"🆂",
-T:"🆃",
-U:"🆄",
-V:"🆅",
-W:"🆆",
-X:"🆇",
-Y:"🆈",
-Z:"🆉"
-};
-
-
-
-function negativeSquared(text){
-    let output="";
-    for(const ch of text.toUpperCase()){
-        output += negativeSquareMap[ch] || ch;
-    }
-    return output;
-}
-
-// =====================================================
-// Part 3 - Text Normalization
-// =====================================================
-
-const DECODE_MAP = {
-    // Bold
-    '𝗔': 'A', '𝗕': 'B', '𝗖': 'C', '𝗗': 'D', '𝗘': 'E', '𝗙': 'F', '𝗚': 'G', '𝗛': 'H', '𝗜': 'I', '𝗝': 'J', '𝗞': 'K', '𝗟': 'L', '𝗠': 'M', '𝗡': 'N', '𝗢': 'O', '𝗣': 'P', '𝗤': 'Q', '𝗥': 'R', '𝗦': 'S', '𝗧': 'T', '𝗨': 'U', '𝗩': 'V', '𝗪': 'W', '𝗫': 'X', '𝗬': 'Y', '𝗭': 'Z',
-    '𝗮': 'a', '𝗯': 'b', '𝗰': 'c', '𝗱': 'd', '𝗲': 'e', '𝗳': 'f', '𝗴': 'g', '𝗵': 'h', '𝗶': 'i', '𝗷': 'j', '𝗸': 'k', '𝗹': 'l', '𝗺': 'm', '𝗻': 'n', '𝗼': 'o', '𝗽': 'p', '𝗾': 'q', '𝗿': 'r', '𝘀': 's', '𝘁': 't', '𝘂': 'u', '𝘃': 'v', '𝘄': 'w', '𝘅': 'x', '𝘆': 'y', '𝘇': 'z',
-    // Italic
-    '𝐴': 'A', '𝐵': 'B', '𝐶': 'C', '𝐷': 'D', '𝐸': 'E', '𝐹': 'F', '𝐺': 'G', '𝐻': 'H', '𝐼': 'I', '𝐽': 'J', '𝐾': 'K', '𝐿': 'L', '𝑀': 'M', '𝑁': 'N', '𝑂': 'O', '𝑃': 'P', '𝑄': 'Q', '𝑅': 'R', '𝑆': 'S', '𝑇': 'T', '𝑈': 'U', '𝑉': 'V', '𝑊': 'W', '𝑋': 'X', '𝑌': 'Y', '𝑍': 'Z',
-    '𝑎': 'a', '𝑏': 'b', '𝑐': 'c', '𝑑': 'd', '𝑒': 'e', '𝑓': 'f', '𝑔': 'g', 'ℎ': 'h', '𝑖': 'i', '𝑗': 'j', '𝑘': 'k', '𝑙': 'l', '𝑚': 'm', '𝑛': 'n', '𝑜': 'o', '𝑝': 'p', '𝑞': 'q', '𝑟': 'r', '𝑠': 's', '𝑡': 't', '𝑢': 'u', '𝑣': 'v', '𝑤': 'w', '𝑥': 'x', '𝑦': 'y', '𝑧': 'z',
-    // Bold Italic
-    '𝑨': 'A', '𝑩': 'B', '𝑪': 'C', '𝑫': 'D', '𝑬': 'E', '𝑭': 'F', '𝑮': 'G', '𝑯': 'H', '𝑰': 'I', '𝑱': 'J', '𝑲': 'K', '𝑳': 'L', '𝑴': 'M', '𝑵': 'N', '𝑶': 'O', '𝑷': 'P', '𝑸': 'Q', '𝑹': 'R', '𝑺': 'S', '𝑻': 'T', '𝑼': 'U', '𝑽': 'V', '𝑾': 'W', '𝑿': 'X', '𝒀': 'Y', '𝒁': 'Z',
-    '𝒂': 'a', '𝒃': 'b', '𝒄': 'c', '𝒅': 'd', '𝒆': 'e', '𝒇': 'f', '𝒈': 'g', '𝒉': 'h', '𝒊': 'i', '𝒋': 'j', '𝒌': 'k', '𝒍': 'l', '𝒎': 'm', '𝒏': 'n', '𝒐': 'o', '𝒑': 'p', '𝒒': 'q', '𝒓': 'r', '𝒔': 's', '𝒕': 't', '𝒖': 'u', '𝒗': 'v', '𝒘': 'w', '𝒙': 'x', '𝒚': 'y', '𝒛': 'z',
-    // Monospace
-    '𝙰': 'A', '𝙱': 'B', '𝙲': 'C', '𝙳': 'D', '𝙴': 'E', '𝙵': 'F', '𝙶': 'G', '𝙷': 'H', '𝙸': 'I', '𝙹': 'J', '𝙺': 'K', '𝙻': 'L', '𝙼': 'M', '𝙽': 'N', '𝙾': 'O', '𝙿': 'P', '𝚀': 'Q', '𝚁': 'R', '𝚂': 'S', '𝚃': 'T', '𝚄': 'U', '𝚅': 'V', '𝚆': 'W', '𝚇': 'X', '𝚈': 'Y', '𝚉': 'Z',
-    '𝚊': 'a', '𝚋': 'b', '𝚌': 'c', '𝚍': 'd', '𝚎': 'e', '𝚏': 'f', '𝚐': 'g', '𝚑': 'h', '𝚒': 'i', '𝚓': 'j', '𝚔': 'k', '𝚕': 'l', '𝚖': 'm', '𝚗': 'n', '𝚘': 'o', '𝚙': 'p', '𝚚': 'q', '𝚛': 'r', '𝚜': 's', '𝚝': 't', '𝚞': 'u', '𝚟': 'v', '𝚠': 'w', '𝚡': 'x', '𝚢': 'y', '𝚣': 'z',
-    // Circled
-    'Ⓐ': 'A', 'Ⓑ': 'B', 'Ⓒ': 'C', 'Ⓓ': 'D', 'Ⓔ': 'E', 'Ⓕ': 'F', 'Ⓖ': 'G', 'Ⓗ': 'H', 'Ⓘ': 'I', 'Ⓙ': 'J', 'Ⓚ': 'K', 'Ⓛ': 'L', 'Ⓜ': 'M', 'Ⓝ': 'N', 'Ⓞ': 'O', 'Ⓟ': 'P', 'Ⓠ': 'Q', 'Ⓡ': 'R', 'Ⓢ': 'S', 'Ⓣ': 'T', 'Ⓤ': 'U', 'Ⓥ': 'V', 'Ⓦ': 'W', 'Ⓧ': 'X', 'Ⓨ': 'Y', 'Ⓩ': 'Z',
-    'ⓐ': 'a', 'ⓑ': 'b', 'ⓒ': 'c', 'ⓓ': 'd', 'ⓔ': 'e', 'ⓕ': 'f', 'ⓖ': 'g', 'ⓗ': 'h', 'ⓘ': 'i', 'ⓙ': 'j', 'ⓚ': 'k', 'ⓛ': 'l', 'ⓜ': 'm', 'ⓝ': 'n', 'ⓞ': 'o', 'ⓟ': 'p', 'ⓠ': 'q', 'ⓡ': 'r', 'ⓢ': 's', 'ⓣ': 't', 'ⓤ': 'u', 'ⓥ': 'v', 'ⓦ': 'w', 'ⓧ': 'x', 'ⓨ': 'y', 'ⓩ': 'z',
-    '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9',
-    // Squared
-    '🄰': 'A', '🄱': 'B', '🄲': 'C', '🄳': 'D', '🄴': 'E', '🄵': 'F', '🄶': 'G', '🄷': 'H', '🄸': 'I', '🄹': 'J', '🄺': 'K', '🄻': 'L', '🄼': 'M', '🄽': 'N', '🄾': 'O', '🄿': 'P', '🅀': 'Q', '🅁': 'R', '🅂': 'S', '🅃': 'T', '🅄': 'U', '🅅': 'V', '🅆': 'W', '🅇': 'X', '🅈': 'Y', '🅉': 'Z',
-    // Negative Squared
-    '🅰': 'A', '🅱': 'B', '🅲': 'C', '🅳': 'D', '🅴': 'E', '🅵': 'F', '🅶': 'G', '🅷': 'H', '🅸': 'I', '🅹': 'J', '🅺': 'K', '🅻': 'L', '🅼': 'M', '🅽': 'N', '🅾': 'O', '🅿': 'P', '🆀': 'Q', '🆁': 'R', '🆂': 'S', '🆃': 'T', '🆄': 'U', '🆅': 'V', '🆆': 'W', '🆇': 'X', '🆈': 'Y', '🆉': 'Z',
-};
-
-function buildNormalizeRegex() {
-    const styledChars = Object.keys(DECODE_MAP);
-    const pattern = styledChars.map(c => c.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|');
-    return new RegExp(pattern, 'g');
-}
-
-const NORMALIZE_REGEX = buildNormalizeRegex();
-
-function normalizeText(text) {
-    // First, handle combining characters
-    let normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-    // Then, use the regex to replace all styled chars in one go
-    return normalized.replace(NORMALIZE_REGEX, (match) => DECODE_MAP[match]);
-}
-
-
+  editor.value = "";
+  saveHistory(true);
+  render();
+  setStatus(UI.app.statusReady);
+})();

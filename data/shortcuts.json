@@ -1,0 +1,78 @@
+{
+  "shortcuts": [
+    {
+      "keys": [
+        "CTRL",
+        "B"
+      ],
+      "style": "bold",
+      "label": "Bold"
+    },
+    {
+      "keys": [
+        "CTRL",
+        "I"
+      ],
+      "style": "italic",
+      "label": "Italic"
+    },
+    {
+      "keys": [
+        "CTRL",
+        "SHIFT",
+        "B"
+      ],
+      "style": "boldItalic",
+      "label": "Bold Italic"
+    },
+    {
+      "keys": [
+        "CTRL",
+        "M"
+      ],
+      "style": "mono",
+      "label": "Monospace"
+    },
+    {
+      "keys": [
+        "CTRL",
+        "U"
+      ],
+      "style": "underline",
+      "label": "Underline"
+    },
+    {
+      "keys": [
+        "CTRL",
+        "SHIFT",
+        "X"
+      ],
+      "style": "strike",
+      "label": "Strikethrough"
+    },
+    {
+      "keys": [
+        "ALT",
+        "C"
+      ],
+      "style": "circled",
+      "label": "Circled"
+    },
+    {
+      "keys": [
+        "ALT",
+        "S"
+      ],
+      "style": "squared",
+      "label": "Squared"
+    },
+    {
+      "keys": [
+        "ALT",
+        "N"
+      ],
+      "style": "negativeSquared",
+      "label": "Negative Squared"
+    }
+  ]
+}
