@@ -255,9 +255,17 @@ const unicodeEngine = {
 
     return [...text]
       .map(ch => {
-        // Applying a combining underline to spaces creates visible
-        // detached "_" artifacts at line ends. Skip whitespace for
-        // underline-style formatting while preserving the actual text.
+        // Combining underline/strike marks on punctuation can render as
+        // detached lines (for example "_" after a comma or period).
+        // Apply the mark only to Unicode letters and numbers when the
+        // style requests skipNonAlphanumeric.
+        if (
+          config.skipNonAlphanumeric &&
+          !/[\\p{L}\\p{N}]/u.test(ch)
+        ) {
+          return ch;
+        }
+
         if (config.skipWhitespace && /\\s/u.test(ch)) {
           return ch;
         }
