@@ -13,10 +13,7 @@
 - `index.html` uses `script.js` without manual `?v=N` cache changes.
 
 Run with:
-`python -m http.server 8000`
-
-Then open:
-`http://localhost:8000/`
+`Live Server`
 
 ## Latest fixes
 
