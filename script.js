@@ -1,187 +1,217 @@
 // LinkedIn Unicode Formatter
-// Data-driven UI + robust Unicode normalization + keyboard shortcuts.
+// Refactored, data-driven Unicode formatter with reliable toggling,
+// selection preservation, undo/redo, and keyboard shortcuts.
+//
+// Static UI text, shortcut definitions, and style definitions are loaded
+// from ./data/*.json. Unicode exception mappings are read from styles.json.
 
-const editor = document.getElementById("editor");
-const preview = document.getElementById("preview");
-const toolbar = document.getElementById("toolbar");
+"use strict";
 
-const undoBtn = document.getElementById("undoBtn");
-const redoBtn = document.getElementById("redoBtn");
-const copyBtn = document.getElementById("copyBtn");
-const clearBtn = document.getElementById("clearBtn");
+// ============================================================================
+// DOM
+// ============================================================================
 
-const charCount = document.getElementById("charCount");
-const maxChars = document.getElementById("maxChars");
-const wordCount = document.getElementById("wordCount");
-const progressBar = document.getElementById("progressBar");
-const selectionInfo = document.getElementById("selectionInfo");
-const statusMessage = document.getElementById("statusMessage");
+const DOM = {
+  editor: document.getElementById("editor"),
+  preview: document.getElementById("preview"),
+  toolbar: document.getElementById("toolbar"),
 
-let UI;
-let SHORTCUTS;
-let STYLE_CONFIG;
+  undoBtn: document.getElementById("undoBtn"),
+  redoBtn: document.getElementById("redoBtn"),
+  copyBtn: document.getElementById("copyBtn"),
+  clearBtn: document.getElementById("clearBtn"),
 
-const MAX_CHAR_FALLBACK = 3000;
+  charCount: document.getElementById("charCount"),
+  maxChars: document.getElementById("maxChars"),
+  wordCount: document.getElementById("wordCount"),
+  progressBar: document.getElementById("progressBar"),
+  selectionInfo: document.getElementById("selectionInfo"),
+  statusMessage: document.getElementById("statusMessage"),
 
-// -----------------------------------------------------------------------------
-// Data loading
-// -----------------------------------------------------------------------------
+  appTitle: document.getElementById("appTitle"),
+  appSubtitle: document.getElementById("appSubtitle"),
+  editorHeading: document.getElementById("editorHeading"),
+  previewHeading: document.getElementById("previewHeading"),
+  previewBadge: document.getElementById("previewBadge"),
+  shortcutTitle: document.getElementById("shortcutTitle"),
+  charsLabel: document.getElementById("charsLabel"),
+  wordsLabel: document.getElementById("wordsLabel"),
+  shortcutList: document.getElementById("shortcutList")
+};
+
+// ============================================================================
+// APPLICATION STATE
+// ============================================================================
+
+const state = {
+  ui: null,
+  shortcuts: [],
+  styles: {},
+
+  history: [],
+  historyIndex: -1,
+  restoringHistory: false,
+
+  maxChars: 3000,
+  isMac: /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+};
+
+// ============================================================================
+// JSON DATA
+// ============================================================================
 
 async function loadJSON(path) {
   const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Could not load ${path}`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to load ${path}: ${response.status}`);
+  }
+
   return response.json();
 }
 
 async function loadAppData() {
   try {
-    [UI, SHORTCUTS, STYLE_CONFIG] = await Promise.all([
+    const [ui, shortcutData, styleData] = await Promise.all([
       loadJSON("./data/ui.json"),
       loadJSON("./data/shortcuts.json"),
       loadJSON("./data/styles.json")
     ]);
+
+    state.ui = ui;
+    state.shortcuts = shortcutData.shortcuts || [];
+    state.styles = styleData.styles || {};
+    state.maxChars = Number(ui.app?.maxChars) || 3000;
   } catch (error) {
-    console.error(error);
-    // The app intentionally stops here instead of silently using stale strings.
+    console.error("Formatter data loading failed:", error);
+
     document.body.innerHTML = `
-      <div style="font-family:Arial;padding:30px;max-width:700px;margin:auto">
+      <div style="
+        font-family: Arial, sans-serif;
+        max-width: 760px;
+        margin: 60px auto;
+        padding: 30px;
+        color: #eee;
+        background: #181818;
+        border: 1px solid #9c27b0;
+        border-radius: 10px;
+      ">
         <h2>Unable to load formatter data</h2>
-        <p>Run this project through a local web server instead of opening
-        <code>index.html</code> directly with <code>file://</code>.</p>
-        <p>For example: <code>python -m http.server 8000</code></p>
-      </div>`;
+        <p>${escapeHTML(error.message)}</p>
+        <p>
+          Run the project through a local server, for example:
+          <code>python -m http.server 8000</code>
+        </p>
+      </div>
+    `;
+
     throw error;
   }
 }
 
-// -----------------------------------------------------------------------------
-// Unicode normalization
-// IMPORTANT: Do not use a hand-written decode table for mathematical alphabets.
-// Code-point ranges are deterministic and avoid bugs such as the old bold
-// s-z entries being mapped to a different Unicode alphabet.
-// -----------------------------------------------------------------------------
+// ============================================================================
+// SMALL UTILITIES
+// ============================================================================
 
-const SPECIAL_LETTERS = {
-  // Mathematical alphabets use a few compatibility characters.
-  italicUpper: { H: "ℋ", I: "ℐ", L: "ℒ", R: "ℛ" },
-  italicLower: { h: "ℎ" },
-  boldItalicUpper: { C: "𝑪", H: "𝑯" },
-  boldItalicLower: {},
-  monoUpper: {},
-  monoLower: {}
-};
-
-const CIRCLED_DECODE = {
-  "ⓐ":"a","ⓑ":"b","ⓒ":"c","ⓓ":"d","ⓔ":"e","ⓕ":"f","ⓖ":"g","ⓗ":"h","ⓘ":"i","ⓙ":"j",
-  "ⓚ":"k","ⓛ":"l","ⓜ":"m","ⓝ":"n","ⓞ":"o","ⓟ":"p","ⓠ":"q","ⓡ":"r","ⓢ":"s","ⓣ":"t",
-  "ⓤ":"u","ⓥ":"v","ⓦ":"w","ⓧ":"x","ⓨ":"y","ⓩ":"z",
-  "Ⓐ":"A","Ⓑ":"B","Ⓒ":"C","Ⓓ":"D","Ⓔ":"E","Ⓕ":"F","Ⓖ":"G","Ⓗ":"H","Ⓘ":"I","Ⓙ":"J",
-  "Ⓚ":"K","Ⓛ":"L","Ⓜ":"M","Ⓝ":"N","Ⓞ":"O","Ⓟ":"P","Ⓠ":"Q","Ⓡ":"R","Ⓢ":"S","Ⓣ":"T",
-  "Ⓤ":"U","Ⓥ":"V","Ⓦ":"W","Ⓧ":"X","Ⓨ":"Y","Ⓩ":"Z",
-  "⓪":"0","①":"1","②":"2","③":"3","④":"4","⑤":"5","⑥":"6","⑦":"7","⑧":"8","⑨":"9"
-};
-
-const SQUARED_DECODE = {
-  "🄰":"A","🄱":"B","🄲":"C","🄳":"D","🄴":"E","🄵":"F","🄶":"G","🄷":"H","🄸":"I","🄹":"J",
-  "🄺":"K","🄻":"L","🄼":"M","🄽":"N","🄾":"O","🄿":"P","🅀":"Q","🅁":"R","🅂":"S","🅃":"T",
-  "🅄":"U","🅅":"V","🅆":"W","🅇":"X","🅈":"Y","🅉":"Z"
-};
-
-const NEGATIVE_SQUARED_DECODE = {
-  "🅰":"A","🅱":"B","🅲":"C","🅳":"D","🅴":"E","🅵":"F","🅶":"G","🅷":"H","🅸":"I","🅹":"J",
-  "🅺":"K","🅻":"L","🅼":"M","🅽":"N","🅾":"O","🅿":"P","🆀":"Q","🆁":"R","🆂":"S","🆃":"T",
-  "🆄":"U","🆅":"V","🆆":"W","🆇":"X","🆈":"Y","🆉":"Z"
-};
-
-function codePointRangeMap(text, upperStart, lowerStart, special = {}) {
-  let output = "";
-  for (const ch of text) {
-    const cp = ch.codePointAt(0);
-
-    if (cp >= 65 && cp <= 90) {
-      output += String.fromCodePoint(upperStart + cp - 65);
-    } else if (cp >= 97 && cp <= 122) {
-      output += String.fromCodePoint(lowerStart + cp - 97);
-    } else {
-      output += ch;
-    }
-  }
-  return output;
+function escapeHTML(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function decodeMathChar(ch) {
+function hexToCodePoint(hex) {
+  return Number.parseInt(hex, 16);
+}
+
+function codePointToChar(hex) {
+  return String.fromCodePoint(hexToCodePoint(hex));
+}
+
+function isUppercaseASCII(ch) {
   const cp = ch.codePointAt(0);
-
-  // Mathematical Sans-Serif (regular)
-  if (cp >= 0x1D5A0 && cp <= 0x1D5B9) return String.fromCharCode(65 + cp - 0x1D5A0);
-  if (cp >= 0x1D5BA && cp <= 0x1D5D3) return String.fromCharCode(97 + cp - 0x1D5BA);
-
-  // Mathematical Bold (serif)
-  if (cp >= 0x1D400 && cp <= 0x1D419) return String.fromCharCode(65 + cp - 0x1D400);
-  if (cp >= 0x1D41A && cp <= 0x1D433) return String.fromCharCode(97 + cp - 0x1D41A);
-
-  // Mathematical Sans-Serif Bold (visually heavier)
-  if (cp >= 0x1D5D4 && cp <= 0x1D5ED) return String.fromCharCode(65 + cp - 0x1D5D4);
-  if (cp >= 0x1D5EE && cp <= 0x1D607) return String.fromCharCode(97 + cp - 0x1D5EE);
-
-  // Mathematical Italic
-  const italicUpperExceptions = {
-    0x210E:"H", 0x2110:"I", 0x2112:"L", 0x211B:"R"
-  };
-  if (italicUpperExceptions[cp]) return italicUpperExceptions[cp];
-  if (cp >= 0x1D434 && cp <= 0x1D44D) return String.fromCharCode(65 + cp - 0x1D434);
-  if (cp >= 0x1D44E && cp <= 0x1D467) return String.fromCharCode(97 + cp - 0x1D44E);
-  if (cp === 0x210E) return "h";
-
-  // Mathematical Bold Italic
-  if (cp >= 0x1D468 && cp <= 0x1D481) return String.fromCharCode(65 + cp - 0x1D468);
-  if (cp >= 0x1D482 && cp <= 0x1D49B) return String.fromCharCode(97 + cp - 0x1D482);
-
-  // Mathematical Monospace
-  if (cp >= 0x1D670 && cp <= 0x1D689) return String.fromCharCode(65 + cp - 0x1D670);
-  if (cp >= 0x1D68A && cp <= 0x1D6A3) return String.fromCharCode(97 + cp - 0x1D68A);
-
-  return null;
+  return cp >= 65 && cp <= 90;
 }
 
-function normalizeText(text) {
-  // Strip combining marks used by underline/strike, then decode Unicode styles.
-  let result = text.normalize("NFD").replace(/[\u0332\u0336]/g, "");
+function isLowercaseASCII(ch) {
+  const cp = ch.codePointAt(0);
+  return cp >= 97 && cp <= 122;
+}
 
-  let decoded = "";
-  for (const ch of result) {
-    const math = decodeMathChar(ch);
-    if (math !== null) {
-      decoded += math;
-    } else if (CIRCLED_DECODE[ch]) {
-      decoded += CIRCLED_DECODE[ch];
-    } else if (SQUARED_DECODE[ch]) {
-      decoded += SQUARED_DECODE[ch];
-    } else if (NEGATIVE_SQUARED_DECODE[ch]) {
-      decoded += NEGATIVE_SQUARED_DECODE[ch];
-    } else {
-      decoded += ch;
+function isLetterASCII(ch) {
+  return isUppercaseASCII(ch) || isLowercaseASCII(ch);
+}
+
+// ============================================================================
+// UNICODE STYLE ENGINE
+// ============================================================================
+//
+// The important design change is that the encoder AND decoder are generated
+// from styles.json. There is no separate hard-coded "italic h" logic.
+//
+// Example:
+//
+// italic.upper = 1D434
+// italic.lower = 1D44E
+// italic.exceptions.lower.h = 210E
+//
+// Therefore:
+//
+// h -> U+210E (ℎ)
+// ℎ -> h
+//
+// This makes the toggle operation symmetrical.
+
+const unicodeEngine = {
+  decoders: [],
+  combiningMarks: new Set(["0332", "0336"]),
+
+  rebuild() {
+    this.decoders = [];
+
+    for (const [styleName, config] of Object.entries(state.styles)) {
+      if (config.type !== "math") continue;
+
+      const decoder = {
+        styleName,
+        ranges: [],
+        reverseExceptions: new Map()
+      };
+
+      if (config.upper && config.lower) {
+        decoder.ranges.push({
+          sourceStart: 65,
+          sourceEnd: 90,
+          targetStart: hexToCodePoint(config.upper)
+        });
+
+        decoder.ranges.push({
+          sourceStart: 97,
+          sourceEnd: 122,
+          targetStart: hexToCodePoint(config.lower)
+        });
+      }
+
+      this.addExceptions(decoder, config.exceptions);
+      this.decoders.push(decoder);
     }
-  }
+  },
 
-  // Remove accidental combining marks left by copy/paste, but preserve normal
-  // Unicode characters as much as possible.
-  return decoded.normalize("NFC");
-}
+  addExceptions(decoder, exceptions = {}) {
+    for (const [ascii, hex] of Object.entries(exceptions.upper || {})) {
+      decoder.reverseExceptions.set(codePointToChar(hex), ascii);
+    }
 
-// -----------------------------------------------------------------------------
-// Formatting
-// -----------------------------------------------------------------------------
+    for (const [ascii, hex] of Object.entries(exceptions.lower || {})) {
+      decoder.reverseExceptions.set(codePointToChar(hex), ascii);
+    }
+  },
 
-function bold(text) {
-  return codePointRangeMap(text, 0x1D5D4, 0x1D5EE);
-}
-
-function italic(text) {
-    const config = STYLE_CONFIG.styles.italic;
-
-    const upperStart = parseInt(config.upper, 16);
-    const lowerStart = parseInt(config.lower, 16);
+  encodeMath(text, config) {
+    const upperStart = hexToCodePoint(config.upper);
+    const lowerStart = hexToCodePoint(config.lower);
 
     const upperExceptions = config.exceptions?.upper || {};
     const lowerExceptions = config.exceptions?.lower || {};
@@ -189,267 +219,420 @@ function italic(text) {
     let output = "";
 
     for (const ch of text) {
+      // JSON-defined exceptions ALWAYS win over the normal range.
+      if (upperExceptions[ch]) {
+        output += codePointToChar(upperExceptions[ch]);
+        continue;
+      }
 
-        // -----------------------------------------
-        // Uppercase exceptions
-        // -----------------------------------------
-        if (upperExceptions[ch]) {
-            output += String.fromCodePoint(
-                parseInt(upperExceptions[ch], 16)
-            );
-            continue;
-        }
+      if (lowerExceptions[ch]) {
+        output += codePointToChar(lowerExceptions[ch]);
+        continue;
+      }
 
-        // -----------------------------------------
-        // Lowercase exceptions
-        // -----------------------------------------
-        if (lowerExceptions[ch]) {
-            output += String.fromCodePoint(
-                parseInt(lowerExceptions[ch], 16)
-            );
-            continue;
-        }
+      if (isUppercaseASCII(ch)) {
+        output += String.fromCodePoint(
+          upperStart + ch.codePointAt(0) - 65
+        );
+        continue;
+      }
 
-        const code = ch.codePointAt(0);
+      if (isLowercaseASCII(ch)) {
+        output += String.fromCodePoint(
+          lowerStart + ch.codePointAt(0) - 97
+        );
+        continue;
+      }
 
-        // -----------------------------------------
-        // A-Z
-        // -----------------------------------------
-        if (code >= 65 && code <= 90) {
-
-            output += String.fromCodePoint(
-                upperStart + (code - 65)
-            );
-
-            continue;
-        }
-
-        // -----------------------------------------
-        // a-z
-        // -----------------------------------------
-        if (code >= 97 && code <= 122) {
-
-            output += String.fromCodePoint(
-                lowerStart + (code - 97)
-            );
-
-            continue;
-        }
-
-        // -----------------------------------------
-        // Numbers / punctuation / spaces
-        // -----------------------------------------
-        output += ch;
+      output += ch;
     }
 
     return output;
-}
+  },
 
-function boldItalic(text) {
-  return codePointRangeMap(text, 0x1D468, 0x1D482);
-}
+  encodeCombining(text, config) {
+    const mark = codePointToChar(config.mark);
+    return [...text].map(ch => ch + mark).join("");
+  },
 
-function mono(text) {
-  return codePointRangeMap(text, 0x1D670, 0x1D68A);
-}
+  encodeCircled(text) {
+    let output = "";
 
-function underline(text) {
-  return [...text].map(ch => ch + "\u0332").join("");
-}
+    for (const ch of text) {
+      const cp = ch.codePointAt(0);
 
-function strike(text) {
-  return [...text].map(ch => ch + "\u0336").join("");
-}
+      if (cp >= 65 && cp <= 90) {
+        output += String.fromCodePoint(0x24B6 + cp - 65);
+      } else if (cp >= 97 && cp <= 122) {
+        output += String.fromCodePoint(0x24D0 + cp - 97);
+      } else if (cp >= 49 && cp <= 57) {
+        output += String.fromCodePoint(0x2460 + cp - 49);
+      } else if (ch === "0") {
+        output += "⓪";
+      } else {
+        output += ch;
+      }
+    }
 
-const squareMap = {
-  A:"🄰",B:"🄱",C:"🄲",D:"🄳",E:"🄴",F:"🄵",G:"🄶",H:"🄷",I:"🄸",J:"🄹",
-  K:"🄺",L:"🄻",M:"🄼",N:"🄽",O:"🄾",P:"🄿",Q:"🅀",R:"🅁",S:"🅂",T:"🅃",
-  U:"🅄",V:"🅅",W:"🅆",X:"🅇",Y:"🅈",Z:"🅉"
+    return output;
+  },
+
+  encodeMap(text, config) {
+    const map = config.map || {};
+
+    return [...text]
+      .map(ch => map[ch] || ch)
+      .join("");
+  },
+
+  encode(text, styleName) {
+    const config = state.styles[styleName];
+
+    if (!config) return text;
+
+    switch (config.type) {
+      case "math":
+        return this.encodeMath(text, config);
+
+      case "combining":
+        return this.encodeCombining(text, config);
+
+      case "circled":
+        return this.encodeCircled(text);
+
+      case "squared":
+      case "negativeSquared":
+        return this.encodeMap(text, config);
+
+      default:
+        return text;
+    }
+  },
+
+  decodeMathChar(ch) {
+    for (const decoder of this.decoders) {
+      // 1. Check JSON-defined exceptions first.
+      if (decoder.reverseExceptions.has(ch)) {
+        return decoder.reverseExceptions.get(ch);
+      }
+
+      // 2. Check normal mathematical ranges.
+      const cp = ch.codePointAt(0);
+
+      for (const range of decoder.ranges) {
+        const length = range.sourceEnd - range.sourceStart;
+
+        if (cp >= range.targetStart && cp <= range.targetStart + length) {
+          return String.fromCharCode(
+            range.sourceStart + cp - range.targetStart
+          );
+        }
+      }
+    }
+
+    return null;
+  },
+
+  decodeMapChar(ch, config) {
+    const map = config.map || {};
+
+    for (const [plain, styled] of Object.entries(map)) {
+      if (styled === ch) return plain;
+    }
+
+    return null;
+  },
+
+  normalize(text) {
+    // NFD is useful for removing combining underline/strike marks.
+    // Do NOT remove every combining mark: only our formatter marks.
+    let input = text.normalize("NFD");
+
+    for (const markHex of this.combiningMarks) {
+      input = input.replaceAll(codePointToChar(markHex), "");
+    }
+
+    let output = "";
+
+    for (const ch of input) {
+      // Mathematical alphabets
+      const mathDecoded = this.decodeMathChar(ch);
+
+      if (mathDecoded !== null) {
+        output += mathDecoded;
+        continue;
+      }
+
+      // Circled characters
+      const circledDecoded = decodeCircledChar(ch);
+
+      if (circledDecoded !== null) {
+        output += circledDecoded;
+        continue;
+      }
+
+      // Squared / negative squared characters
+      let mapped = false;
+
+      for (const styleName of ["squared", "negativeSquared"]) {
+        const config = state.styles[styleName];
+
+        if (!config) continue;
+
+        const decoded = this.decodeMapChar(ch, config);
+
+        if (decoded !== null) {
+          output += decoded;
+          mapped = true;
+          break;
+        }
+      }
+
+      if (mapped) continue;
+
+      output += ch;
+    }
+
+    return output.normalize("NFC");
+  }
 };
 
-const negativeSquareMap = {
-  A:"🅰",B:"🅱",C:"🅲",D:"🅳",E:"🅴",F:"🅵",G:"🅶",H:"🅷",I:"🅸",J:"🅹",
-  K:"🅺",L:"🅻",M:"🅼",N:"🅽",O:"🅾",P:"🅿",Q:"🆀",R:"🆁",S:"🆂",T:"🆃",
-  U:"🆄",V:"🆅",W:"🆆",X:"🆇",Y:"🆈",Z:"🆉"
-};
+// ============================================================================
+// CIRCLED DECODER
+// ============================================================================
 
-function circled(text) {
-  let output = "";
-  for (const ch of text) {
-    const cp = ch.codePointAt(0);
-    if (cp >= 65 && cp <= 90) output += String.fromCodePoint(0x24B6 + cp - 65);
-    else if (cp >= 97 && cp <= 122) output += String.fromCodePoint(0x24D0 + cp - 97);
-    else if (cp >= 49 && cp <= 57) output += String.fromCodePoint(0x2460 + cp - 49);
-    else if (ch === "0") output += "⓪";
-    else output += ch;
+function decodeCircledChar(ch) {
+  const cp = ch.codePointAt(0);
+
+  if (cp >= 0x24B6 && cp <= 0x24CF) {
+    return String.fromCharCode(65 + cp - 0x24B6);
   }
-  return output;
-}
 
-function squared(text) {
-  return [...text.toUpperCase()].map(ch => squareMap[ch] || ch).join("");
-}
-
-function negativeSquared(text) {
-  return [...text.toUpperCase()].map(ch => negativeSquareMap[ch] || ch).join("");
-}
-
-const FORMATTERS = {
-  bold,
-  italic,
-  boldItalic,
-  mono,
-  underline,
-  strike,
-  circled,
-  squared,
-  negativeSquared
-};
-
-function convertText(text, style) {
-  return FORMATTERS[style] ? FORMATTERS[style](text) : text;
-}
-
-// -----------------------------------------------------------------------------
-// Selection / history
-// -----------------------------------------------------------------------------
-
-let history = [];
-let historyIndex = -1;
-let isRestoringHistory = false;
-
-function snapshot() {
-  return {
-    value: editor.value,
-    start: editor.selectionStart,
-    end: editor.selectionEnd
-  };
-}
-
-function saveHistory(force = false) {
-  const value = editor.value;
-
-  if (!force && historyIndex >= 0 && history[historyIndex].value === value) return;
-
-  history = history.slice(0, historyIndex + 1);
-  history.push(snapshot());
-  historyIndex++;
-}
-
-function restoreHistory(item) {
-  isRestoringHistory = true;
-  editor.value = item.value;
-  editor.focus();
-
-  const start = Math.min(item.start, editor.value.length);
-  const end = Math.min(item.end, editor.value.length);
-  editor.setSelectionRange(start, end);
-
-  isRestoringHistory = false;
-  render();
-}
-
-function undo() {
-  if (historyIndex <= 0) {
-    setStatus(UI.app.statusNothingToUndo);
-    return;
+  if (cp >= 0x24D0 && cp <= 0x24E9) {
+    return String.fromCharCode(97 + cp - 0x24D0);
   }
-  historyIndex--;
-  restoreHistory(history[historyIndex]);
+
+  if (cp >= 0x2460 && cp <= 0x2468) {
+    return String.fromCharCode(49 + cp - 0x2460);
+  }
+
+  if (ch === "⓪") return "0";
+
+  return null;
 }
 
-function redo() {
-  if (historyIndex >= history.length - 1) {
-    setStatus(UI.app.statusNothingToRedo);
-    return;
-  }
-  historyIndex++;
-  restoreHistory(history[historyIndex]);
+// ============================================================================
+// FORMATTER API
+// ============================================================================
+
+function formatText(text, styleName) {
+  return unicodeEngine.encode(text, styleName);
 }
+
+function normalizeText(text) {
+  return unicodeEngine.normalize(text);
+}
+
+function isAlreadyFormatted(text, styleName) {
+  if (!text || !state.styles[styleName]) return false;
+
+  const plain = normalizeText(text);
+
+  if (plain === text) {
+    // This also prevents pressing Bold/Italic on plain text from being
+    // incorrectly treated as a toggle-off operation.
+    return false;
+  }
+
+  return formatText(plain, styleName) === text;
+}
+
+// ============================================================================
+// SELECTION
+// ============================================================================
 
 function getSelection() {
   return {
-    start: editor.selectionStart ?? 0,
-    end: editor.selectionEnd ?? 0
+    start: DOM.editor.selectionStart ?? 0,
+    end: DOM.editor.selectionEnd ?? 0
   };
 }
 
-function selectedText() {
+function getSelectedText() {
   const { start, end } = getSelection();
-  return editor.value.slice(start, end);
+  return DOM.editor.value.slice(start, end);
+}
+
+function setSelection(start, end = start) {
+  DOM.editor.focus();
+  DOM.editor.setSelectionRange(start, end);
 }
 
 function replaceSelection(newText) {
   const { start, end } = getSelection();
-  const scrollTop = editor.scrollTop;
+  const scrollTop = DOM.editor.scrollTop;
 
-  editor.value = editor.value.slice(0, start) + newText + editor.value.slice(end);
-  editor.focus();
-  editor.setSelectionRange(start, start + newText.length);
-  editor.scrollTop = scrollTop;
+  DOM.editor.value =
+    DOM.editor.value.slice(0, start) +
+    newText +
+    DOM.editor.value.slice(end);
+
+  setSelection(start, start + newText.length);
+  DOM.editor.scrollTop = scrollTop;
 
   render();
   saveHistory();
 }
 
-// -----------------------------------------------------------------------------
-// Toggle behavior
-// -----------------------------------------------------------------------------
+// ============================================================================
+// FORMATTING / TOGGLE
+// ============================================================================
 
-function selectionIsExactlyStyle(text, style) {
-  const base = normalizeText(text);
-  if (!base || !FORMATTERS[style]) return false;
-  return convertText(base, style) === text;
-}
+function applyStyle(styleName) {
+  const selected = getSelectedText();
 
-function applyStyle(style) {
-  const text = selectedText();
-
-  if (!text) {
-    setStatus(UI.app.statusNoSelection);
-    editor.focus();
+  if (!selected) {
+    setStatus(state.ui.app.statusNoSelection);
+    DOM.editor.focus();
     return;
   }
 
-  const base = normalizeText(text);
-  const output = selectionIsExactlyStyle(text, style)
-    ? base
-    : convertText(base, style);
+  const plain = normalizeText(selected);
 
-  replaceSelection(output);
+  // If the complete selection is already in the requested style,
+  // clicking the same button toggles it back to plain text.
+  const toggledOff = isAlreadyFormatted(selected, styleName);
 
-  const styleName = STYLE_CONFIG.styles[style]?.name || style;
-  setStatus(UI.app.statusFormatted.replace("{style}", styleName));
+  const result = toggledOff
+    ? plain
+    : formatText(plain, styleName);
+
+  replaceSelection(result);
+
+  const styleNameForUI =
+    state.styles[styleName]?.name || styleName;
+
+  setStatus(
+    state.ui.app.statusFormatted.replace(
+      "{style}",
+      styleNameForUI
+    )
+  );
 }
 
-// -----------------------------------------------------------------------------
-// Rendering
-// -----------------------------------------------------------------------------
+// ============================================================================
+// HISTORY
+// ============================================================================
+
+function createSnapshot() {
+  return {
+    value: DOM.editor.value,
+    start: DOM.editor.selectionStart ?? 0,
+    end: DOM.editor.selectionEnd ?? 0,
+    scrollTop: DOM.editor.scrollTop
+  };
+}
+
+function saveHistory(force = false) {
+  const current = createSnapshot();
+  const previous = state.history[state.historyIndex];
+
+  if (
+    !force &&
+    previous &&
+    previous.value === current.value
+  ) {
+    // Text has not changed, so don't create duplicate history entries.
+    return;
+  }
+
+  state.history = state.history.slice(0, state.historyIndex + 1);
+  state.history.push(current);
+  state.historyIndex++;
+}
+
+function restoreSnapshot(snapshot) {
+  state.restoringHistory = true;
+
+  DOM.editor.value = snapshot.value;
+
+  const start = Math.min(
+    snapshot.start,
+    DOM.editor.value.length
+  );
+
+  const end = Math.min(
+    snapshot.end,
+    DOM.editor.value.length
+  );
+
+  DOM.editor.focus();
+  DOM.editor.setSelectionRange(start, end);
+  DOM.editor.scrollTop = snapshot.scrollTop || 0;
+
+  state.restoringHistory = false;
+
+  render();
+}
+
+function undo() {
+  if (state.historyIndex <= 0) {
+    setStatus(state.ui.app.statusNothingToUndo);
+    return;
+  }
+
+  state.historyIndex--;
+  restoreSnapshot(state.history[state.historyIndex]);
+}
+
+function redo() {
+  if (state.historyIndex >= state.history.length - 1) {
+    setStatus(state.ui.app.statusNothingToRedo);
+    return;
+  }
+
+  state.historyIndex++;
+  restoreSnapshot(state.history[state.historyIndex]);
+}
+
+// ============================================================================
+// RENDER / STATS
+// ============================================================================
 
 function updatePreview() {
-  preview.textContent = editor.value;
+  DOM.preview.textContent = DOM.editor.value;
 }
 
 function updateStats() {
-  const text = editor.value;
-  const max = Number(UI.app.maxChars) || MAX_CHAR_FALLBACK;
+  const text = DOM.editor.value;
 
-  charCount.textContent = text.length;
-  maxChars.textContent = max;
+  DOM.charCount.textContent = text.length;
+  DOM.maxChars.textContent = state.maxChars;
 
   const trimmed = text.trim();
-  wordCount.textContent = trimmed ? trimmed.split(/\s+/).length : 0;
 
-  const percent = Math.min((text.length / max) * 100, 100);
-  progressBar.style.width = `${percent}%`;
-  progressBar.classList.toggle("over-limit", text.length > max);
+  DOM.wordCount.textContent = trimmed
+    ? trimmed.split(/\s+/).length
+    : 0;
+
+  const percentage = Math.min(
+    (text.length / state.maxChars) * 100,
+    100
+  );
+
+  DOM.progressBar.style.width = `${percentage}%`;
+  DOM.progressBar.classList.toggle(
+    "over-limit",
+    text.length > state.maxChars
+  );
 }
 
 function updateSelectionInfo() {
-  const count = selectedText().length;
-  selectionInfo.textContent = count
-    ? UI.app.selectedTemplate.replace("{count}", count)
-    : UI.app.selectionPrompt;
+  const count = getSelectedText().length;
+
+  DOM.selectionInfo.textContent = count
+    ? state.ui.app.selectedTemplate.replace("{count}", count)
+    : state.ui.app.selectionPrompt;
 }
 
 function render() {
@@ -459,162 +642,276 @@ function render() {
 }
 
 function setStatus(message) {
-  statusMessage.textContent = message;
+  DOM.statusMessage.textContent = message;
 }
 
-// -----------------------------------------------------------------------------
-// UI from JSON
-// -----------------------------------------------------------------------------
+// ============================================================================
+// UI GENERATION
+// ============================================================================
 
-function buildUI() {
-  document.title = UI.app.title;
+function buildStaticUI() {
+  const app = state.ui.app;
 
-  document.getElementById("appTitle").textContent = UI.app.title;
-  document.getElementById("appSubtitle").textContent = UI.app.subtitle;
-  document.getElementById("editorHeading").textContent = UI.app.editorHeading;
-  document.getElementById("previewHeading").textContent = UI.app.previewHeading;
-  document.getElementById("previewBadge").textContent = UI.app.previewBadge;
-  document.getElementById("shortcutTitle").textContent = UI.app.shortcutTitle;
-  document.getElementById("charsLabel").textContent = UI.app.charsLabel;
-  document.getElementById("wordsLabel").textContent = UI.app.wordsLabel;
+  document.title = app.title;
 
-  undoBtn.textContent = UI.app.undo;
-  redoBtn.textContent = UI.app.redo;
-  copyBtn.textContent = UI.app.copy;
-  clearBtn.textContent = UI.app.clear;
+  DOM.appTitle.textContent = app.title;
+  DOM.appSubtitle.textContent = app.subtitle;
+  DOM.editorHeading.textContent = app.editorHeading;
+  DOM.previewHeading.textContent = app.previewHeading;
+  DOM.previewBadge.textContent = app.previewBadge;
+  DOM.shortcutTitle.textContent = app.shortcutTitle;
+  DOM.charsLabel.textContent = app.charsLabel;
+  DOM.wordsLabel.textContent = app.wordsLabel;
 
-  toolbar.innerHTML = "";
-  UI.toolbar.forEach(item => {
+  DOM.undoBtn.textContent = app.undo;
+  DOM.redoBtn.textContent = app.redo;
+  DOM.copyBtn.textContent = app.copy;
+  DOM.clearBtn.textContent = app.clear;
+}
+
+function buildToolbar() {
+  DOM.toolbar.replaceChildren();
+
+  for (const item of state.ui.toolbar || []) {
     const button = document.createElement("button");
+
     button.type = "button";
     button.className = "tool";
     button.dataset.style = item.style;
+
     button.title = `${item.title} — ${item.shortcut}`;
     button.setAttribute("aria-label", item.title);
-    button.innerHTML = `<span class="tool-glyph">${item.label}</span><span class="tool-name">${item.title}</span><kbd>${item.shortcut}</kbd>`;
 
-    // Critical: prevent the button click from destroying textarea selection.
-    button.addEventListener("mousedown", event => event.preventDefault());
-    button.addEventListener("click", () => applyStyle(item.style));
+    const glyph = document.createElement("span");
+    glyph.className = "tool-glyph";
+    glyph.textContent = item.label;
 
-    toolbar.appendChild(button);
-  });
+    const name = document.createElement("span");
+    name.className = "tool-name";
+    name.textContent = item.title;
 
-  const shortcutList = document.getElementById("shortcutList");
-  shortcutList.innerHTML = "";
-  SHORTCUTS.shortcuts.forEach(item => {
+    const shortcut = document.createElement("kbd");
+    shortcut.textContent = item.shortcut;
+
+    button.append(glyph, name, shortcut);
+
+    // Critical for textarea formatting:
+    // mousedown normally moves focus to the button and clears the
+    // textarea's selection. Preventing the default keeps selection intact.
+    button.addEventListener("mousedown", event => {
+      event.preventDefault();
+    });
+
+    button.addEventListener("click", () => {
+      applyStyle(item.style);
+    });
+
+    DOM.toolbar.appendChild(button);
+  }
+}
+
+function buildShortcutList() {
+  DOM.shortcutList.replaceChildren();
+
+  for (const item of state.shortcuts) {
     const chip = document.createElement("span");
     chip.className = "shortcut-chip";
-    chip.innerHTML = `<kbd>${formatKeys(item.keys)}</kbd><span>${item.label}</span>`;
-    shortcutList.appendChild(chip);
-  });
+
+    const keys = document.createElement("kbd");
+    keys.textContent = formatShortcutKeys(item.keys);
+
+    const label = document.createElement("span");
+    label.textContent = item.label;
+
+    chip.append(keys, label);
+    DOM.shortcutList.appendChild(chip);
+  }
 }
 
-function formatKeys(keys) {
-  const isMac = navigator.platform.toLowerCase().includes("mac");
-  return keys.map(key => {
-    if (key === "CTRL") return isMac ? "⌘" : "Ctrl";
-    if (key === "SHIFT") return "⇧";
-    if (key === "ALT") return isMac ? "⌥" : "Alt";
-    return key;
-  }).join("+");
+function formatShortcutKeys(keys) {
+  return keys
+    .map(key => {
+      if (key === "CTRL") return state.isMac ? "⌘" : "Ctrl";
+      if (key === "SHIFT") return "⇧";
+      if (key === "ALT") return state.isMac ? "⌥" : "Alt";
+      return key;
+    })
+    .join("+");
 }
 
-// -----------------------------------------------------------------------------
-// Keyboard shortcuts
-// -----------------------------------------------------------------------------
+// ============================================================================
+// KEYBOARD SHORTCUTS
+// ============================================================================
 
 function shortcutMatches(event, keys) {
-  const isMac = navigator.platform.toLowerCase().includes("mac");
   const wantsCtrl = keys.includes("CTRL");
   const wantsShift = keys.includes("SHIFT");
   const wantsAlt = keys.includes("ALT");
 
-  const ctrlPressed = isMac ? event.metaKey : event.ctrlKey;
+  const ctrlPressed = state.isMac
+    ? event.metaKey
+    : event.ctrlKey;
+
+  const key = event.key.toUpperCase();
 
   return (
     ctrlPressed === wantsCtrl &&
     event.shiftKey === wantsShift &&
     event.altKey === wantsAlt &&
-    keys.includes(event.key.toUpperCase())
+    keys.includes(key)
   );
 }
 
-document.addEventListener("keydown", event => {
-  // Undo / redo are handled separately.
-  if (!event.altKey && !event.shiftKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+function handleKeyboardShortcuts(event) {
+  const modifier = state.isMac
+    ? event.metaKey
+    : event.ctrlKey;
+
+  // Undo
+  if (
+    modifier &&
+    event.key.toLowerCase() === "z" &&
+    !event.altKey
+  ) {
     event.preventDefault();
-    if (event.shiftKey) redo();
-    else undo();
+
+    if (event.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+
     return;
   }
 
-  if (!event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+  // Redo
+  if (
+    modifier &&
+    event.key.toLowerCase() === "y" &&
+    !event.altKey &&
+    !event.shiftKey
+  ) {
     event.preventDefault();
     redo();
     return;
   }
 
-  const shortcut = SHORTCUTS.shortcuts.find(item => shortcutMatches(event, item.keys));
+  const shortcut = state.shortcuts.find(item =>
+    shortcutMatches(event, item.keys)
+  );
+
   if (!shortcut) return;
 
   event.preventDefault();
   applyStyle(shortcut.style);
-});
+}
 
-// -----------------------------------------------------------------------------
-// Editor events
-// -----------------------------------------------------------------------------
+// ============================================================================
+// EDITOR EVENTS
+// ============================================================================
 
-editor.addEventListener("input", () => {
-  if (!isRestoringHistory) saveHistory();
+function handleEditorInput() {
+  if (!state.restoringHistory) {
+    saveHistory();
+  }
+
   render();
-});
+}
 
-["select", "keyup", "click", "focus"].forEach(eventName => {
-  editor.addEventListener(eventName, updateSelectionInfo);
-});
+function updateSelectionInfoOnly() {
+  updateSelectionInfo();
+}
 
-// Save selection before the mouse can move focus to a toolbar control.
-document.addEventListener("selectionchange", updateSelectionInfo);
+// ============================================================================
+// BUTTON ACTIONS
+// ============================================================================
 
-undoBtn.addEventListener("click", undo);
-redoBtn.addEventListener("click", redo);
-
-clearBtn.addEventListener("click", () => {
-  if (!editor.value) return;
-  editor.value = "";
-  editor.focus();
-  editor.setSelectionRange(0, 0);
-  saveHistory();
-  render();
-  setStatus(UI.app.statusCleared);
-});
-
-copyBtn.addEventListener("click", async () => {
+async function copyOutput() {
   try {
-    await navigator.clipboard.writeText(editor.value);
-    copyBtn.textContent = UI.app.copied;
-    setStatus(UI.app.copied);
-    setTimeout(() => {
-      copyBtn.textContent = UI.app.copy;
+    await navigator.clipboard.writeText(DOM.editor.value);
+
+    DOM.copyBtn.textContent = state.ui.app.copied;
+    setStatus(state.ui.app.copied);
+
+    window.setTimeout(() => {
+      DOM.copyBtn.textContent = state.ui.app.copy;
     }, 1200);
   } catch (error) {
-    console.error(error);
-    setStatus(UI.app.statusCopyFailed);
+    console.error("Copy failed:", error);
+    setStatus(state.ui.app.statusCopyFailed);
   }
-});
+}
 
-// -----------------------------------------------------------------------------
-// Startup
-// -----------------------------------------------------------------------------
+function clearEditor() {
+  if (!DOM.editor.value) return;
 
-(async function init() {
-  await loadAppData();
-  buildUI();
-
-  editor.value = "";
-  saveHistory(true);
+  DOM.editor.value = "";
+  setSelection(0);
+  saveHistory();
   render();
-  setStatus(UI.app.statusReady);
-})();
+  setStatus(state.ui.app.statusCleared);
+}
+
+// ============================================================================
+// EVENT BINDINGS
+// ============================================================================
+
+function bindEvents() {
+  DOM.editor.addEventListener("input", handleEditorInput);
+
+  for (const eventName of [
+    "select",
+    "keyup",
+    "click",
+    "focus",
+    "mouseup"
+  ]) {
+    DOM.editor.addEventListener(
+      eventName,
+      updateSelectionInfoOnly
+    );
+  }
+
+  document.addEventListener(
+    "keydown",
+    handleKeyboardShortcuts
+  );
+
+  DOM.undoBtn.addEventListener("click", undo);
+  DOM.redoBtn.addEventListener("click", redo);
+  DOM.copyBtn.addEventListener("click", copyOutput);
+  DOM.clearBtn.addEventListener("click", clearEditor);
+
+  // selectionchange is useful when selection changes through keyboard/mouse
+  // without an editor-specific event.
+  document.addEventListener(
+    "selectionchange",
+    updateSelectionInfoOnly
+  );
+}
+
+// ============================================================================
+// STARTUP
+// ============================================================================
+
+async function init() {
+  await loadAppData();
+
+  // Build all Unicode decoder tables AFTER styles.json is available.
+  unicodeEngine.rebuild();
+
+  buildStaticUI();
+  buildToolbar();
+  buildShortcutList();
+  bindEvents();
+
+  DOM.editor.value = "";
+  saveHistory(true);
+
+  render();
+  setStatus(state.ui.app.statusReady);
+}
+
+init().catch(error => {
+  console.error("Formatter initialization failed:", error);
+});
