@@ -17,3 +17,10 @@ Run with:
 
 Then open:
 `http://localhost:8000/`
+
+## Latest fixes
+
+- Underline no longer adds combining underline marks to whitespace, preventing detached underscore artifacts.
+- Squared and Negative Squared preserve the original formatter behavior by converting ASCII lowercase letters to the available uppercase Unicode square alphabet.
+- Both behaviors are controlled by `styles.json`; no formatter-specific behavior is hard-coded in the JS.
+- Other formatters, including Bold, Italic, Bold Italic, Monospace, and Strikethrough, are unchanged.

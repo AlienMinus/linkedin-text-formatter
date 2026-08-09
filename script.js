@@ -252,7 +252,19 @@ const unicodeEngine = {
 
   encodeCombining(text, config) {
     const mark = codePointToChar(config.mark);
-    return [...text].map(ch => ch + mark).join("");
+
+    return [...text]
+      .map(ch => {
+        // Applying a combining underline to spaces creates visible
+        // detached "_" artifacts at line ends. Skip whitespace for
+        // underline-style formatting while preserving the actual text.
+        if (config.skipWhitespace && /\\s/u.test(ch)) {
+          return ch;
+        }
+
+        return ch + mark;
+      })
+      .join("");
   },
 
   encodeCircled(text) {
@@ -281,7 +293,15 @@ const unicodeEngine = {
     const map = config.map || {};
 
     return [...text]
-      .map(ch => map[ch] || ch)
+      .map(ch => {
+        let lookup = ch;
+
+        if (config.case === "upper" && /[a-z]/.test(ch)) {
+          lookup = ch.toUpperCase();
+        }
+
+        return map[lookup] || ch;
+      })
       .join("");
   },
 
