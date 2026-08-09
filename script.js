@@ -112,9 +112,17 @@ function codePointRangeMap(text, upperStart, lowerStart, special = {}) {
 function decodeMathChar(ch) {
   const cp = ch.codePointAt(0);
 
-  // Mathematical Bold
+  // Mathematical Sans-Serif (regular)
   if (cp >= 0x1D5A0 && cp <= 0x1D5B9) return String.fromCharCode(65 + cp - 0x1D5A0);
   if (cp >= 0x1D5BA && cp <= 0x1D5D3) return String.fromCharCode(97 + cp - 0x1D5BA);
+
+  // Mathematical Bold (serif)
+  if (cp >= 0x1D400 && cp <= 0x1D419) return String.fromCharCode(65 + cp - 0x1D400);
+  if (cp >= 0x1D41A && cp <= 0x1D433) return String.fromCharCode(97 + cp - 0x1D41A);
+
+  // Mathematical Sans-Serif Bold (visually heavier)
+  if (cp >= 0x1D5D4 && cp <= 0x1D5ED) return String.fromCharCode(65 + cp - 0x1D5D4);
+  if (cp >= 0x1D5EE && cp <= 0x1D607) return String.fromCharCode(97 + cp - 0x1D5EE);
 
   // Mathematical Italic
   const italicUpperExceptions = {
@@ -166,7 +174,7 @@ function normalizeText(text) {
 // -----------------------------------------------------------------------------
 
 function bold(text) {
-  return codePointRangeMap(text, 0x1D5A0, 0x1D5BA);
+  return codePointRangeMap(text, 0x1D5D4, 0x1D5EE);
 }
 
 function italic(text) {

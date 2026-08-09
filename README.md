@@ -18,8 +18,9 @@ Then open:
 Key fixes:
 1. Toolbar buttons preserve textarea selection with mousedown.preventDefault().
 2. Unicode normalization is code-point based instead of relying on a fragile hand-written map.
-3. The previous bold s-z decoding issue is eliminated.
-4. Formatting can toggle: formatting already-styled selected text restores plain text.
-5. Keyboard shortcuts are data-driven.
-6. Undo/redo preserves both text and selection.
-7. Static UI labels/tooltips/shortcut definitions live in JSON.
+4. Bold uses Mathematical Bold (U+1D400/U+1D41A), matching the Mathematical Bold Italic family (U+1D468/U+1D482).
+4. The previous bold s-z decoding issue is eliminated.
+5. Formatting can toggle: formatting already-styled selected text restores plain text.
+6. Keyboard shortcuts are data-driven.
+7. Undo/redo preserves both text and selection.
+8. Static UI labels/tooltips/shortcut definitions live in JSON.

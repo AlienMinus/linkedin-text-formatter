@@ -1,10 +1,10 @@
 {
   "styles": {
     "bold": {
-      "name": "Bold",
+      "name": "Bold (Heavy)",
       "type": "math",
-      "upper": "1D400",
-      "lower": "1D41A"
+      "upper": "1D5D4",
+      "lower": "1D5EE"
     },
     "italic": {
       "name": "Italic",
