@@ -179,16 +179,39 @@ function bold(text) {
 
 function italic(text) {
   let output = "";
+
   for (const ch of text) {
-    if (SPECIAL_LETTERS.italicUpper[ch]) output += SPECIAL_LETTERS.italicUpper[ch];
-    else if (SPECIAL_LETTERS.italicLower[ch]) output += SPECIAL_LETTERS.italicLower[ch];
-    else {
-      const cp = ch.codePointAt(0);
-      if (cp >= 65 && cp <= 90) output += String.fromCodePoint(0x1D434 + cp - 65);
-      else if (cp >= 97 && cp <= 122) output += String.fromCodePoint(0x1D44E + cp - 97);
-      else output += ch;
+    // Mathematical Italic has several Unicode compatibility/exceptions.
+    // Most importantly, lowercase h is U+210E (ℎ), NOT U+1D455.
+    if (SPECIAL_LETTERS.italicUpper[ch]) {
+      output += SPECIAL_LETTERS.italicUpper[ch];
+      continue;
+    }
+
+    if (SPECIAL_LETTERS.italicLower[ch]) {
+      output += SPECIAL_LETTERS.italicLower[ch];
+      continue;
+    }
+
+    const cp = ch.codePointAt(0);
+
+    if (cp >= 65 && cp <= 90) {
+      output += String.fromCodePoint(0x1D434 + cp - 65);
+    } else if (cp >= 97 && cp <= 122) {
+      // h is intentionally skipped because its italic glyph is U+210E.
+      if (ch === "h") {
+        output += "\u210E";
+      } else {
+        const offset = cp - 97;
+        // Keep the Unicode code-point gap at U+1D455. It is unassigned;
+        // lowercase i therefore correctly remains U+1D456.
+        output += String.fromCodePoint(0x1D44E + offset);
+      }
+    } else {
+      output += ch;
     }
   }
+
   return output;
 }
 

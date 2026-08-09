@@ -10,7 +10,18 @@
       "name": "Italic",
       "type": "math",
       "upper": "1D434",
-      "lower": "1D44E"
+      "lower": "1D44E",
+      "exceptions": {
+        "upper": {
+          "H": "210B",
+          "I": "2110",
+          "L": "2112",
+          "R": "211B"
+        },
+        "lower": {
+          "h": "210E"
+        }
+      }
     },
     "boldItalic": {
       "name": "Bold Italic",
